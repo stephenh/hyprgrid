@@ -6,23 +6,30 @@ column](docs/grid.gif)
 
 Multi-tasking with agents involves "way more windows" than traditional window management.
 
-I.e. pre-agents, I worked on _one thing at a time_ 😅, and so Hyprland's 9 numbered `1-9` workspaces to manage my ~5-6 windows (IDE, a few terminals, a browser or two) were plenty!
+I.e. pre-agents, I worked on _one thing at a time_ 😅, and so Hyprland's numbered `1-9` workspaces to manage my ~5-6 windows (IDE on `1`, a few terminals on `2`, a browser or two on `3`) were plenty!
 
 But now driving agents across 5 tasks simultaneously, we go from "about 6" windows to manage -> `6 x 5 = 30` windows 🤯.
 
-This is a very common problem, and typically solved with tmux -- but:
+This is a very common problem, and often solved with tmux -- but:
 
 1. tmux can only drive terminals -- what about my IDEs and browser windows?
-2. tmux requires learning another set of key binds to do tmux window/pane management.
+2. tmux requires another set of key binds to do tmux window/pane management.
 
-hyprgrid solves this use case by teaching Hyprland to drive "lots of workspaces".
+Instead, hyprgrid teaches Hyprland how to drive _lots_ of workspaces.
 
-Specifically we create a "grid" of workspaces:
+Specifically we create a "grid" of many workspaces:
 
-* Columns in the grid are your tools -- the IDEs are "column 1", the terminals are "column 2"
+* Columns in the grid are your tools -- the IDEs are column `1`, the terminals are column `2`
 * Rows in the grid are tasks, with single letter abbreviations -- `a` is working updating skills, `b` is work task one, `c` is work task two, etc.
 
-The killer feature of hyprgrid is binds that let us:
+Each workspace in then grid is then a column number + task tag:
+
+- `1a` is "the IDE for task a"
+- `2a` is "the terminal(s) for task a"
+- `3a` is "the browser(s)" for task a"
+- etc.
+
+The killer feature of hyprgrid is providing key binds & Lua routines to:
 
 1. Stay on task -- if I'm working on task `b`, any `super+1/2/3` keybind moves to the same task's `1b/2b/3b` workspace
 2. Switch tasks -- if I switch to task `c`, all workspaces move together, so `1a` on Monitor 1 and `2a` on Monitor 2 would both move to `1b` and `2b` at the same time.
