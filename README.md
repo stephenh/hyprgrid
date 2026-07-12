@@ -1,26 +1,36 @@
-# hyprgrid — native Hyprland workspaces for juggling many agents across many tasks
+# hyprgrid — native Hyprland workspaces for juggling many agents
 
-Running a dozen coding agents at once, each chewing on a different task, is miserable on a tmux-shaped desk:
-every task collapses into a wall of terminal panes, and you end up fluent in two overlapping
-window-management languages at the same time — your compositor's and tmux's. **hyprgrid** puts each *task*
-on its own set of **native Hyprland workspaces** instead, so a task can own a real IDE window, a browser,
-and its terminals together, and you drive all of it with the window-manager keys you already know.
+## Overview
 
-## The model
+Multi-tasking with agents involves "way more windows" than traditional window management.
 
-Picture a grid:
+I.e. pre-agents, I worked on one thing at a time, and so Hyprland's 9 numbered `1-9` workspaces were plenty! I put the IDE on workspace 1, terminal(s) on 2, and browser window(s) on 3 -- let's say ~5-6 task-specific windows spread across the 3 workspaces.
 
-- **Columns** are your monitors / roles — the numbered home workspaces `1..9`. Each monitor sits in a column
-  (e.g. `1` = editor screen, `2` = terminals, `3` = browser/personal).
-- **Tags** (rows `a..h`) are your **tasks**. A tag spans every column, so tag `a` is one task's slice on all
-  monitors, tag `b` the next task's, and so on. Each tag carries a **description** — the task's name
-  (`skills`, `bug-one`) — shown in waybar.
-- **One keystroke switches the whole task, everywhere.** `Super+Ctrl+J/K` walks every monitor to the same tag
-  in lock-step: flip to tag `a` and your editor monitor shows `1a`, terminals monitor `2a`, browser monitor
-  `3a` — the entire desktop reconfigures to that task at once. `Super+Ctrl+1..9` jump straight to a task.
+But now if I'm driving agents across 5 tasks, we go from "about 6" windows to management (for the current task) -> `6 x 5 = 30` windows if working on 5 tasks at once.
 
-So: spin up an agent per task, give each task a tag, and hop between them instantly — every hop bringing that
-task's full multi-window, multi-monitor layout with it.
+This is a very common problem, and typically solved with tmux -- but:
+
+1. tmux can only drive terminals -- what about my IDEs and browser windows?
+2. tmux requires learning another set of key binds (different leader, not just Hyprland's SUPER) to do tmux window/pane management.
+
+hyprgrid solves this use case by teaching Hyprland to drive "lots of workspaces".
+
+Specifically we create a "grid" of workspaces:
+
+* Columns in the grid are your tools -- the IDE is "column 1", the terminal(s) are "column 2"
+* Rows in the grid are each task, with single letter abbreviations -- `a` is working on a hobby project, `b` is work task one, `c` is work task two, etc.
+
+![hyprgrid: four columns (Zed, Terminal, Browser, Logs) across task rows a–d; each cell is its own
+workspace (1a, 2b, 3d…), rows are sparse, and the focus band slides between tasks in lock-step across every
+column](docs/grid.gif)
+
+<sub>Columns are apps/monitors; rows are tasks. `Super+Ctrl+J/K` moves the focus band between tasks — every
+column jumps to that task at once. Cells are sparse: a task only has the windows it needs.</sub>
+
+The killer feature of hyprgrid is binds that let us:
+
+1. Stay on task -- if I'm working on task `b`, any `super+1/2/3` keybind moves to the `1b/2b/3c` workspace
+2. Switch tasks -- if I switch to task `c`, all workspaces move together, so `1a` on Monitor 1 and `2a` on Monitor 2 would both move to `1b` and `2b` at the same time.
 
 ## Why not tmux
 
