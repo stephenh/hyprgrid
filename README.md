@@ -1,35 +1,30 @@
 # hyprgrid — native Hyprland workspaces for juggling many agents
 
-## Overview
+![hyprgrid: four columns (Zed, Terminal, Browser, Logs) across task rows a–d; each cell is its own
+workspace (1a, 2b, 3d…), rows are sparse, and the focus band slides between tasks in lock-step across every
+column](docs/grid.gif)
 
 Multi-tasking with agents involves "way more windows" than traditional window management.
 
-I.e. pre-agents, I worked on one thing at a time, and so Hyprland's 9 numbered `1-9` workspaces were plenty! I put the IDE on workspace 1, terminal(s) on 2, and browser window(s) on 3 -- let's say ~5-6 task-specific windows spread across the 3 workspaces.
+I.e. pre-agents, I worked on _one thing at a time_ 😅, and so Hyprland's 9 numbered `1-9` workspaces to manage my ~5-6 windows (IDE, a few terminals, a browser or two) were plenty!
 
-But now if I'm driving agents across 5 tasks, we go from "about 6" windows to management (for the current task) -> `6 x 5 = 30` windows if working on 5 tasks at once.
+But now driving agents across 5 tasks simultaneously, we go from "about 6" windows to manage -> `6 x 5 = 30` windows 🤯.
 
 This is a very common problem, and typically solved with tmux -- but:
 
 1. tmux can only drive terminals -- what about my IDEs and browser windows?
-2. tmux requires learning another set of key binds (different leader, not just Hyprland's SUPER) to do tmux window/pane management.
+2. tmux requires learning another set of key binds to do tmux window/pane management.
 
 hyprgrid solves this use case by teaching Hyprland to drive "lots of workspaces".
 
 Specifically we create a "grid" of workspaces:
 
-* Columns in the grid are your tools -- the IDE is "column 1", the terminal(s) are "column 2"
-* Rows in the grid are each task, with single letter abbreviations -- `a` is working on a hobby project, `b` is work task one, `c` is work task two, etc.
-
-![hyprgrid: four columns (Zed, Terminal, Browser, Logs) across task rows a–d; each cell is its own
-workspace (1a, 2b, 3d…), rows are sparse, and the focus band slides between tasks in lock-step across every
-column](docs/grid.gif)
-
-<sub>Columns are apps/monitors; rows are tasks. `Super+Ctrl+J/K` moves the focus band between tasks — every
-column jumps to that task at once. Cells are sparse: a task only has the windows it needs.</sub>
+* Columns in the grid are your tools -- the IDEs are "column 1", the terminals are "column 2"
+* Rows in the grid are tasks, with single letter abbreviations -- `a` is working updating skills, `b` is work task one, `c` is work task two, etc.
 
 The killer feature of hyprgrid is binds that let us:
 
-1. Stay on task -- if I'm working on task `b`, any `super+1/2/3` keybind moves to the `1b/2b/3c` workspace
+1. Stay on task -- if I'm working on task `b`, any `super+1/2/3` keybind moves to the same task's `1b/2b/3b` workspace
 2. Switch tasks -- if I switch to task `c`, all workspaces move together, so `1a` on Monitor 1 and `2a` on Monitor 2 would both move to `1b` and `2b` at the same time.
 
 ## Why not tmux
