@@ -1,0 +1,40 @@
+// One waybar bar per monitor. Every bar pulls the shared module set from shared.jsonc, and each
+// overrides custom/workspace-description so it passes its OWN monitor name to hypr-ws-desc. That way
+// the description reflects the workspace shown on THAT monitor (a home workspace shows its own label,
+// e.g. "IDE"/"terminal"; a grid workspace shows the active tag's description, e.g. "skills"/"hyprgrid").
+//
+// To add/remove a monitor, copy a block and change "output" + the monitor name in the exec. The whole
+// module set lives in shared.jsonc so it stays defined once. (`omarchy refresh waybar` resets this to the
+// stock single-bar config; re-apply from ~/other/hyprgrid/waybar if that happens.)
+[
+  {
+    "output": "DP-1",
+    "include": ["/home/stephen/.config/waybar/shared.jsonc"],
+    "custom/workspace-description": {
+      "exec": "$HOME/.local/bin/hypr-ws-desc show DP-1",
+      "signal": 11,
+      "format": "{}",
+      "tooltip": false
+    }
+  },
+  {
+    "output": "DP-2",
+    "include": ["/home/stephen/.config/waybar/shared.jsonc"],
+    "custom/workspace-description": {
+      "exec": "$HOME/.local/bin/hypr-ws-desc show DP-2",
+      "signal": 11,
+      "format": "{}",
+      "tooltip": false
+    }
+  },
+  {
+    "output": "HDMI-A-1",
+    "include": ["/home/stephen/.config/waybar/shared.jsonc"],
+    "custom/workspace-description": {
+      "exec": "$HOME/.local/bin/hypr-ws-desc show HDMI-A-1",
+      "signal": 11,
+      "format": "{}",
+      "tooltip": false
+    }
+  }
+]

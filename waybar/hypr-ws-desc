@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# Manage per-workspace descriptions shown in waybar.
+#   hypr-ws-desc show [MON] -> print the description for MON's active workspace (for a per-monitor
+#                              waybar bar), or the focused workspace's if no monitor is given
+#   hypr-ws-desc set   -> prompt for the active workspace's description and save it
+#   hypr-ws-desc seed  -> reset the runtime store from the git-tracked defaults (on login)
+# DEFAULTS is checked into git and shared across machines; STORE is ephemeral (reset each login).
+set -uo pipefail
+
+STORE="${XDG_STATE_HOME:-$HOME/.local/state}/hypr/workspace-descriptions.json"
+DEFAULTS="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/workspace-descriptions.default.json"
+WAYBAR_SIGNAL=11
+
+# Copy the defaults into the store (falling back to "{}"). I.e. used by ensure_store and seed.
+reset_store_from_defaults() {
+  mkdir -p "$(dirname "$STORE")"
+  if [[ -f $DEFAULTS ]]; then cp "$DEFAULTS" "$STORE"; else echo '{}' >"$STORE"; fi
+}
+
+# Ensure the store exists and holds valid JSON. I.e. seed from defaults on first use.
+ensure_store() {
+  [[ -s $STORE ]] || reset_store_from_defaults
+}
+
+# Reset the runtime store from defaults, discarding session edits; then refresh waybar.
+cmd_seed() {
+  reset_store_from_defaults
+  pkill "-RTMIN+$WAYBAR_SIGNAL" waybar 2>/dev/null || true
+}
+
+# Name of the currently focused workspace. I.e. "2" or "2a".
+active_name() {
+  hyprctl activeworkspace -j | jq -r '.name'
+}
+
+# Name of the workspace currently shown on a given monitor. I.e. monitor_ws_name "DP-1" -> "1" or "2a".
+monitor_ws_name() {
+  hyprctl monitors -j | jq -r --arg m "$1" '.[] | select(.name == $m) | .activeWorkspace.name' 2>/dev/null
+}
+
+# Description key for a workspace: a grid workspace keys on its tag (shared across home columns), a
+# home workspace keys on its own name (per-column label). I.e. "2a" -> "a", "2" -> "2".
+key_for() {
+  if [[ $1 =~ ^[0-9]+([a-z]+)$ ]]; then printf '%s' "${BASH_REMATCH[1]}"; else printf '%s' "$1"; fi
+}
+
+# Print the description for MON's active workspace (or the focused one if MON is empty), keyed by
+# tag for grid workspaces and by number for home workspaces. I.e. show "DP-2" while it shows "2a" -> tag "a".
+cmd_show() {
+  ensure_store
+  local name key
+  if [[ -n "${1:-}" ]]; then name=$(monitor_ws_name "$1"); else name=$(active_name); fi
+  key=$(key_for "$name")
+  jq -r --arg n "$key" '.[$n] // empty' "$STORE" 2>/dev/null
+}
+
+# Prompt (prefilled with the current value) and save under the tag/column key; then refresh waybar.
+cmd_set() {
+  ensure_store
+  local name key current new tmp
+  name=$(active_name)
+  key=$(key_for "$name")
+  current=$(jq -r --arg n "$key" '.[$n] // empty' "$STORE" 2>/dev/null)
+  new=$(omarchy-menu-input "${current:-Describe workspace $name}" || true)
+  [[ -z $new ]] && exit 0 # escaped or left blank: keep existing
+  tmp=$(mktemp)
+  if jq --arg n "$key" --arg d "$new" '.[$n] = $d' "$STORE" >"$tmp"; then
+    mv "$tmp" "$STORE"
+    pkill "-RTMIN+$WAYBAR_SIGNAL" waybar 2>/dev/null || true
+  else
+    rm -f "$tmp"
+  fi
+}
+
+# Shift per-tag description keys after a tag renumber. Args are OLD=NEW pairs (e.g. `remap b=a c=b`): the
+# rebuilt store keeps home (numeric) keys and sets NEW to OLD's value from the pre-remap snapshot; grid-tag
+# keys not named as a target are dropped. I.e. used by workspace-grid's reconcile_tags when it compacts tags.
+cmd_remap() {
+  ensure_store
+  local map='{}' pair o n tmp
+  for pair in "$@"; do
+    o="${pair%%=*}"
+    n="${pair#*=}"
+    map=$(jq -c --arg o "$o" --arg n "$n" '. + {($o): $n}' <<<"$map")
+  done
+  tmp=$(mktemp)
+  if jq --argjson map "$map" '
+      . as $old
+      | (with_entries(select(.key | test("^[0-9]+$"))))
+      | reduce ($map | to_entries[]) as $m (.;
+          if $old[$m.key] != null then .[$m.value] = $old[$m.key] else . end)
+    ' "$STORE" >"$tmp"; then
+    mv "$tmp" "$STORE"
+    pkill "-RTMIN+$WAYBAR_SIGNAL" waybar 2>/dev/null || true
+  else
+    rm -f "$tmp"
+  fi
+}
+
+case "${1:-show}" in
+show)
+  shift
+  cmd_show "${1:-}"
+  ;;
+set) cmd_set ;;
+seed) cmd_seed ;;
+remap)
+  shift
+  cmd_remap "$@"
+  ;;
+*)
+  echo "usage: hypr-ws-desc {show|set|seed|remap OLD=NEW ...}" >&2
+  exit 1
+  ;;
+esac

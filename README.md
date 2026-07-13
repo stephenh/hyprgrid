@@ -54,6 +54,50 @@ The killer feature of hyprgrid is providing key binds & Lua routines to:
 `workspace-grid.lua` is the whole implementation. It lives in `~/.config/hypr/` and is kept byte-for-byte in
 sync with the copy in this repo.
 
+## Install
+
+hyprgrid runs on **Hyprland's native Lua config** (the `hl` / `o` API). The task descriptions also use
+`jq` and waybar. Omarchy ships all three.
+
+**1. The grid.** Drop the script in and load it from your Lua entrypoint:
+
+```sh
+cp workspace-grid.lua ~/.config/hypr/
+```
+```lua
+-- in ~/.config/hypr/hyprland.lua
+require("hypr.workspace-grid")
+```
+
+`hyprctl reload`, and the [keybinds](#keybinds) below are live. The number of tasks is the single knob at
+the top of the script — `MAX_ROWS = 9` gives tags `a..h` (8 tasks); bump it for more.
+
+**2. Descriptions in waybar.** The per-monitor task labels are a small separate piece — the `hypr-ws-desc`
+script, a defaults file, and a one-bar-per-monitor waybar config. See **[waybar/README.md](waybar/README.md)**
+for the wiring.
+
+### Workspace defaults
+
+- **Columns are just the standard numbered workspaces.** Home columns `1..9` are Hyprland/Omarchy's default
+  `Super+1..9` workspaces, one per monitor — hyprgrid only adds the vertical (tag) axis on top, so there's
+  nothing to pre-create.
+- **Default column labels** live in `waybar/workspace-descriptions.default.json` — git-tracked, shared
+  across machines, and seeded into the runtime store on login (`hypr-ws-desc seed`). Edit it to set your own:
+
+  | Workspace | Default label |
+  |---|---|
+  | `1` | IDE |
+  | `2` | terminal |
+  | `3` | personal browser |
+  | `4` | work browser |
+  | `5` | debug browser |
+  | `7` | code reviews |
+  | `8` | slack |
+  | `0` | roam |
+
+- **Task (tag) descriptions** — `a = skills`, `b = hyprgrid` — aren't defaults: you set them per task with
+  `Super+D`, and the grid renumbers them for you as tasks compact.
+
 ## Keybinds
 
 | Keys | Action |
