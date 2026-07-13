@@ -1,0 +1,32 @@
+// Minimal example of the bar that each per-monitor block in config.jsonc includes.
+//
+// On a real setup this file is your OWN full waybar bar (clock, tray, battery, weather, ...). It is
+// stripped here to just the two hyprgrid-relevant modules, so config.jsonc resolves to something runnable
+// and the sort-by fix lives as code rather than only in prose. Each per-monitor bar in config.jsonc
+// includes this file and overrides only custom/workspace-description to pass its own monitor name — see
+// README.md.
+{
+  "layer": "top",
+  "position": "bottom",
+  "height": 26,
+  "spacing": 0,
+
+  "modules-left": ["hyprland/workspaces", "custom/workspace-description"],
+
+  // This bar's monitor shows its own workspaces. sort-by "name" keeps a column's tags in tag order
+  // (3, 3a, 3b) instead of creation order — see the "Tag ordering" note in README.md.
+  "hyprland/workspaces": {
+    "on-click": "activate",
+    "sort-by": "name",
+    "format": "{name}"
+  },
+
+  // The task description for this bar's monitor. config.jsonc overrides the exec per monitor to pass the
+  // monitor name (e.g. `hypr-ws-desc show DP-1`); this default (no monitor) reads the focused workspace.
+  "custom/workspace-description": {
+    "exec": "$HOME/.local/bin/hypr-ws-desc show",
+    "signal": 11,
+    "format": "{}",
+    "tooltip": false
+  }
+}
