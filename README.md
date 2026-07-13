@@ -1,4 +1,4 @@
-# hyprgrid — native Hyprland workspaces for juggling many agents
+# hyprgrid — use native Hyprland workspaces to juggle many agents
 
 ![hyprgrid: four columns (Zed, Terminal, Browser, Logs) across task rows a–d; each cell is its own
 workspace (1a, 2b, 3d…), rows are sparse, and the focus band slides between tasks in lock-step across every
@@ -25,18 +25,18 @@ Specifically we create a "grid" of many workspaces (see the animated gif above):
   - `1a` is "the IDE for task a"
   - `1b` is "the IDE for task b"
   - `2a` is "the terminal(s) for task a"
+  - `2b` is "the terminal(s) for task b"
   - etc.
 
-The killer feature of hyprgrid is providing key binds & Lua routines to:
+The killer features of hyprgrid are key binds & Lua routines to:
 
-1. Stay on task -- if I'm working on task `b`, any `super+1/2/3` keybind moves to "that column" (i.e. `super+1` moves to column `1`) but picks the `b` task's workspace in that column (i.e. `1b`)
-2. Switch tasks -- if I switch to task `c`, all columns move together, so `1b` on Monitor 1 and `2b` on Monitor 2 would both move to `1c` and `2c` at the same time.
+1. Stay on task -- if I'm working on task `b`, any `super+1/2/3` keybind moves to "that column/tool" (i.e. `super+1` moves to column `1` but picks the `1b` task workspace in that column)
+2. Switch tasks -- if I switch to task `c`, all columns/tools move together, so `1b` on Monitor 1 and `2b` on Monitor 2 would both move to `1c` and `2c` at the same time (i.e. show task `c`s IDE & terminal simultaneously)
 
 ## Why not tmux
 
-- **Real windows, not just terminals.** tmux panes only hold terminals. A hyprgrid task is native Hyprland
-  workspaces, so it can manage your editor GUI, a browser, a PDF viewer — anything — right next to its
-  terminals.
+- **Real windows, not just terminals.** tmux panes only hold terminals. A hyprgrid task is multiple native Hyprland
+  workspaces, so it can manage your editor GUI, a browser, a PDF viewer — anything — right next to its terminals.
 - **One set of binds.** tmux requires a second, prefix-key window-management layer on top of your
   compositor's binds. hyprgrid uses a single system — Hyprland — for splitting, moving, and switching.
   Nothing archaic to memorize twice, no OS-vs-tmux bind collisions.
@@ -56,8 +56,7 @@ sync with the copy in this repo.
 
 ## Install
 
-hyprgrid runs on **Hyprland's native Lua config** (the `hl` / `o` API). The task descriptions also use
-`jq` and waybar. Omarchy ships all three.
+hyprgrid runs on **Hyprland's native Lua config**. The task descriptions also use `jq` and waybar. Omarchy ships all three.
 
 **1. The grid.** Drop the script in and load it from your Lua entrypoint:
 
@@ -79,8 +78,7 @@ for the wiring.
 ### Workspace defaults
 
 - **Columns are just the standard numbered workspaces.** Home columns `1..9` are Hyprland/Omarchy's default
-  `Super+1..9` workspaces, one per monitor — hyprgrid only adds the vertical (tag) axis on top, so there's
-  nothing to pre-create.
+  `Super+1..9` workspaces — hyprgrid only adds the vertical (tag) axis on top.
 - **Default column labels** live in `waybar/workspace-descriptions.default.json` — git-tracked, shared
   across machines, and seeded into the runtime store on login (`hypr-ws-desc seed`). Edit it to set your own:
 
@@ -112,8 +110,7 @@ for the wiring.
 
 ## Developing & testing
 
-The grid is complex enough — lock-step, persistent tags, split-healing, row compaction — that editing the
-*live* session to test it kept causing real damage. So it's developed against a **fake Hyprland, in Lua**,
+The grid is complex enough that we develop & regression test against a **fake Hyprland, in Lua**,
 with zero risk to any running session:
 
 ```sh
