@@ -1,0 +1,13 @@
+/* Paste into ~/.config/waybar/style.css. Styles the workspace that an agent marked urgent (see
+   notify/README.md). A pulsing underline — a heavier, breathing version of the .active underline —
+   drawn in @foreground so it matches any theme. Cleared when you focus the workspace.
+   With "reload_style_on_change": true in your bar config, edits apply live (no restart). */
+#workspaces button.urgent {
+  border-bottom: 2px solid @foreground;
+  animation: hyprgrid-urgent 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes hyprgrid-urgent {
+  from { border-bottom-color: alpha(@foreground, 0.2); }
+  to   { border-bottom-color: @foreground; }
+}

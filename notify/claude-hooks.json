@@ -1,0 +1,13 @@
+{
+  "//": "Merge this 'hooks' block into ~/.claude/settings.json (keep your other settings). Stop fires when",
+  "//2": "Claude finishes responding; Notification fires on permission prompts / waiting for input. Open",
+  "//3": "/hooks once (or restart) so a running session picks them up. Remove these '//' keys when merging.",
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "$HOME/.local/bin/hypr-agent-bell" }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "$HOME/.local/bin/hypr-agent-bell" }] }
+    ]
+  }
+}

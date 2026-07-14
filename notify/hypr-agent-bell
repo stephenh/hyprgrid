@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Ring the controlling terminal's bell so an unfocused Alacritty (Wayland) requests attention. With
+# Hyprland's misc:focus_on_activate = false that marks the window's workspace *urgent* rather than stealing
+# focus, and waybar highlights it via the .urgent class on the workspace button. Focusing the workspace
+# clears it. Invoked by the claude-code Stop/Notification hooks (and mirrored by the opencode
+# session.idle plugin at ~/.config/opencode/plugins/hypr-agent-bell.js).
+{ printf '\a' >/dev/tty; } 2>/dev/null && exit 0
+# Fallback when the caller has no controlling tty: ring the parent process's terminal instead.
+term=$(ps -o tty= -p "${PPID:-$$}" 2>/dev/null | tr -d '[:space:]')
+[ -n "$term" ] && [ "$term" != "?" ] && printf '\a' >"/dev/$term" 2>/dev/null
+exit 0

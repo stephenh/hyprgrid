@@ -75,6 +75,10 @@ the top of the script — `MAX_ROWS = 9` gives tags `a..h` (8 tasks); bump it fo
 script, a defaults file, and a one-bar-per-monitor waybar config. See **[waybar/README.md](waybar/README.md)**
 for the wiring.
 
+**3. Agent-done alerts (optional).** Make a task's workspace **pulse in waybar** when a Claude Code or
+opencode agent finishes in an unfocused window (terminal bell → Hyprland urgent). See
+**[notify/README.md](notify/README.md)**.
+
 ### Workspace defaults
 
 - **Columns are just the standard numbered workspaces.** Home columns `1..9` are Hyprland/Omarchy's default
