@@ -107,7 +107,7 @@ opencode agent finishes in an unfocused window (terminal bell → Hyprland urgen
 | `Super+Ctrl+J` / `Super+Ctrl+K` | Next / previous **task** (all monitors, lock-step) |
 | `Super+Ctrl+1..9` | Jump to home / task `a..h` |
 | `Super+1..0` | Switch a monitor to column `1..10` (staying on the current task) |
-| `Super+Ctrl+Shift+J` / `…+K` | Move the focused window **down / up a task** |
+| `Super+Ctrl+Shift+J` / `…+K` | Move the focused window **down / up a task** — every monitor follows in lock-step, carrying the window |
 | `Super+Ctrl+L` / `Super+Ctrl+H` | Walk to the next / previous workspace in grid order |
 | `Super+Shift+O` / `Super+Shift+Y` | Move the whole column to the monitor on the right / left |
 | `Super+D` | Set the current task's description |

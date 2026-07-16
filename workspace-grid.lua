@@ -256,19 +256,19 @@ local function go_row(delta)
   if target ~= row then set_all_to_row(target) end
 end
 
--- Move the active window to another row of its home column and follow it there (this monitor only). We
--- move silently then focus the target (window.move's built-in follow doesn't fire the workspace.active
--- handler, so the waybar tag/description would go stale). reconcile_tags then squeezes out any tag row the
--- move just emptied. I.e. delta=1 carries the window home -> a.
+-- Move the active window to the tag above/below AND take every monitor there with it, so the whole grid
+-- follows the window in lock-step -- exactly like Super+Ctrl+J/K does without shift. We move the window
+-- silently (follow=false) so focus stays put, then set_all_to_row lock-steps every monitor -- including the
+-- focused one, which lands on the workspace the window moved to (its focus fires the workspace.active
+-- handler that refreshes current_row + the waybar description). reconcile_tags then squeezes out any tag row
+-- the move just emptied. I.e. delta=1 carries the window (and the grid) home -> a -> b.
 local function move_row(delta)
   local col, row = current_cell()
   if not col then return end
   local target = math.max(1, math.min(MAX_ROWS, row + delta))
   if target == row then return end
   hl.dispatch(hl.dsp.window.move({ workspace = selector_for(col, target), follow = false }))
-  hl.dispatch(hl.dsp.focus({ workspace = selector_for(col, target) }))
-  local _, landed = current_cell()
-  if landed and landed >= 2 then current_row = landed end
+  set_all_to_row(target)
   reconcile_tags()
 end
 
@@ -351,8 +351,8 @@ end
 
 hl.bind("SUPER + CTRL + K", function() go_row(-1) end, { description = "Grid row up (all monitors)", repeating = true })
 hl.bind("SUPER + CTRL + J", function() go_row(1) end, { description = "Grid row down (all monitors)", repeating = true })
-hl.bind("SUPER + CTRL + SHIFT + K", function() move_row(-1) end, { description = "Move window up a grid row" })
-hl.bind("SUPER + CTRL + SHIFT + J", function() move_row(1) end, { description = "Move window down a grid row" })
+hl.bind("SUPER + CTRL + SHIFT + K", function() move_row(-1) end, { description = "Move window up a task (all monitors follow)" })
+hl.bind("SUPER + CTRL + SHIFT + J", function() move_row(1) end, { description = "Move window down a task (all monitors follow)" })
 hl.unbind("SUPER + CTRL + H") -- was "Hardware menu" (omarchy default); use grid-aware walk instead
 hl.unbind("SUPER + CTRL + L") -- was "Lock system" (omarchy default); walk right takes it
 hl.bind("SUPER + CTRL + L", function() walk(1) end, { description = "Walk to next workspace (grid order)", repeating = true })

@@ -1,4 +1,5 @@
--- Multi-monitor features: moving a whole column across monitors, and auto-healing a split column.
+-- Multi-monitor features: moving a whole column across monitors, moving a window (and the whole grid with
+-- it) between tags, and auto-healing a split column.
 local H = require("harness")
 local function super_n(n) return "SUPER + code:" .. (n + 9) end
 
@@ -30,4 +31,38 @@ H.scenario("a split column auto-heals: a stray tag rejoins its column's monitor"
   H.timers()                                  -- fire the debounced heal
   H.eq((H.workspaces())["1a"].mon, "DP-1", "heal pulled 1a back to column 1's monitor (majority/home)")
   H.expect_no_duplicates()
+end)
+
+H.scenario("Super+Ctrl+Shift+J carries the window down a tag AND lock-steps every monitor with it", function()
+  local Stub = require("stub.hyprland")
+  H.boot()
+  -- A full tag-a row: a window in each column's tag a, on that column's own monitor.
+  Stub.seed_window("1a", "DP-1")
+  Stub.seed_window("2a", "DP-2")
+  Stub.seed_window("3a", "HDMI-A-1")
+  H.press("SUPER + CTRL + J")                                       -- bring every monitor onto tag a
+  H.expect_active("DP-1", "1a"); H.expect_active("DP-2", "2a"); H.expect_active("HDMI-A-1", "3a")
+
+  H.press("SUPER + CTRL + SHIFT + J")                               -- move the window down a tag
+  H.expect_active("DP-1", "1b")                                     -- the window's column follows it...
+  H.expect_active("DP-2", "2b"); H.expect_active("HDMI-A-1", "3b")  -- ...and so does every other monitor
+  H.expect_windows("1b", 1); H.expect_absent("1a")                 -- the window moved; its old cell is gone
+  H.expect_focused("DP-1"); H.expect_no_duplicates()
+end)
+
+H.scenario("Super+Ctrl+Shift+K carries the window up a tag AND lock-steps every monitor with it", function()
+  local Stub = require("stub.hyprland")
+  H.boot()
+  -- A full tag-b row (windows in each column's tag b), reached by descending home -> a -> b together.
+  Stub.seed_window("1b", "DP-1")
+  Stub.seed_window("2b", "DP-2")
+  Stub.seed_window("3b", "HDMI-A-1")
+  H.press("SUPER + CTRL + J"); H.press("SUPER + CTRL + J")
+  H.expect_active("DP-1", "1b"); H.expect_active("DP-2", "2b"); H.expect_active("HDMI-A-1", "3b")
+
+  H.press("SUPER + CTRL + SHIFT + K")                               -- move the window up a tag
+  H.expect_active("DP-1", "1a")                                     -- the window's column follows it...
+  H.expect_active("DP-2", "2a"); H.expect_active("HDMI-A-1", "3a")  -- ...and so does every other monitor
+  H.expect_windows("1a", 1); H.expect_absent("1b")
+  H.expect_focused("DP-1"); H.expect_no_duplicates()
 end)
