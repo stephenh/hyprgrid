@@ -113,6 +113,20 @@ function H.expect_column_tags(col, tags)
   H.eq(table.concat(have, ""), table.concat(want, ""), "column " .. col .. " tags")
 end
 
+-- No column's workspaces are spread across more than one monitor (the split-column bug).
+function H.expect_no_split()
+  local by, cols = H.workspaces(), {}
+  for name, w in pairs(by) do
+    local c = name:match("^(%d+)%a*$")
+    if c then cols[c] = cols[c] or {}; cols[c][w.mon] = true end
+  end
+  for c, set in pairs(cols) do
+    local mons = {}
+    for m in pairs(set) do mons[#mons + 1] = m end
+    H.assert(#mons == 1, "column " .. c .. " is split across monitors: " .. table.concat(mons, ", "))
+  end
+end
+
 function H.expect_exists(ws) H.assert((H.workspaces())[ws] ~= nil, "workspace " .. ws .. " should exist") end
 function H.expect_absent(ws) H.assert((H.workspaces())[ws] == nil, "workspace " .. ws .. " should NOT exist") end
 function H.expect_windows(ws, n)

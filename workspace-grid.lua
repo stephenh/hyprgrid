@@ -243,6 +243,11 @@ local function reconcile_tags()
     hl.dispatch(hl.dsp.focus({ monitor = origin }))
     set_all_to_row(frow and (newrow[frow] or math.min(frow, top)) or 1)
   end
+  -- A compaction can leave a column split across monitors -- its renames/refocus never move a workspace
+  -- between monitors, so a column whose home had already drifted stays split -- and nothing else heals on a
+  -- window close, so the split would linger until the next login. Consolidate any split column now, so
+  -- closing tags never strands one on the wrong monitor.
+  heal_split_columns()
   hl.exec_cmd("pkill -RTMIN+11 waybar")
   reconciling = false
 end
@@ -374,6 +379,11 @@ for n = 1, 10 do
   hl.unbind(key)
   o.bind(key, "Switch to workspace " .. col .. " (current tag)", function() go_column(col) end)
 end
+
+-- Present Super+0's workspace (Hyprland's numbered workspace 10) as "0". Its id stays 10 so the numeric
+-- selector above still lands on it; only the display name changes. Waybar sorts by name, so "0" sits at the
+-- FRONT of the bar (0,1,2,2a,...) instead of the raw "10" wedging lexicographically between "1" and "2".
+hl.workspace_rule({ workspace = 10, default_name = "0" })
 
 -- Waybar descriptions (see ~/.local/bin/hypr-ws-desc): a home workspace shows its own label
 -- (1=ide, 2=terminal, ...); a grid workspace shows its tag's shared label (every *a alike, etc.).

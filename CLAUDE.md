@@ -22,9 +22,11 @@ Concretely, when driving `hyprctl` (even for diagnosis), NEVER:
 3. `lua run.lua` until green (also works under `luajit`).
 4. If you learned a new *Hyprland* behavior, encode it in `tests/hyprland_behaviors.lua` first — the stub is
    only trustworthy insofar as those hold.
-5. Port to live: `cp ./workspace-grid.lua ~/.config/hypr/workspace-grid.lua`, then
-   `hyprctl reload && hyprctl configerrors` (must be empty). Keep the two files byte-identical
-   (`diff -q` them).
+5. Port to live. **FIRST `diff ~/.config/hypr/workspace-grid.lua ./workspace-grid.lua`** — the live file may
+   carry edits made outside this repo (e.g. a hand-added `hl.workspace_rule{...}`); fold any such lines into
+   `./workspace-grid.lua` *before* overwriting, or the `cp` silently clobbers them. (Diffing only *after*
+   the `cp` is useless — it always matches.) Then `cp ./workspace-grid.lua ~/.config/hypr/workspace-grid.lua`,
+   `hyprctl reload && hyprctl configerrors` (must be empty), and `diff -q` to confirm byte-identical.
 6. Ask the user to smoke-test on real windows before trusting it — the stub is synchronous; real Hyprland's
    focus is async (that gap is where the remaining risk lives).
 

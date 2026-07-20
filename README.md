@@ -47,7 +47,8 @@ The killer features of hyprgrid are key binds & Lua routines to:
 - **Self-compacting tasks:** empty a task's row and it's squeezed out; the higher tasks renumber down to stay
   contiguous (`c→b`, `d→c`) across all columns simultaneously — and each task's **description rides along**
   with it.
-- **Split-healing:** if a resume or monitor hotplug scatters a column's workspaces, they rejoin their monitor.
+- **Split-healing:** if a resume, monitor hotplug, or tag close scatters a column's workspaces across
+  monitors, they rejoin their monitor (a compaction heals any split it would otherwise leave behind).
 - **Move a whole task/column across monitors**, and **move a single window between tasks**.
 - Per-task **descriptions** in waybar via `~/.local/bin/hypr-ws-desc`.
 

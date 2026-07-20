@@ -33,6 +33,25 @@ H.scenario("a split column auto-heals: a stray tag rejoins its column's monitor"
   H.expect_no_duplicates()
 end)
 
+H.scenario("closing a tag consolidates a split column instead of stranding it until the next login", function()
+  local Stub = require("stub.hyprland")
+  H.boot()
+  -- The drifted layout this bug hit: column 2 (a..d) piled on DP-2 with its home, but column 1's lone tag
+  -- 1c sits on a DIFFERENT monitor from its (drifted) home -- column 1 is already split.
+  Stub.seed_window("2a", "DP-2"); Stub.seed_window("2b", "DP-2")
+  local c2 = Stub.seed_window("2c", "DP-2"); Stub.seed_window("2d", "DP-2")
+  local c1 = Stub.seed_window("1c", "DP-1")                                     -- column 1's lone tag on DP-1
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2c" }))                      -- view 2c on DP-2 (focused)
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "1", monitor = "DP-2" })) -- home 1 drifts onto DP-2 -> column 1 split
+
+  H.close(c2)                                              -- close 2c (focused DP-2); tag c still held by 1c
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1c" })) -- step over to 1c on DP-1
+  H.close(c1)                                              -- close 1c -> compact 2d->2c, which must also heal the split
+
+  H.expect_no_split()       -- column 1 rejoined one monitor (it used to stay split until relogin)
+  H.expect_no_duplicates()
+end)
+
 H.scenario("Super+Ctrl+Shift+J carries the window down a tag AND lock-steps every monitor with it", function()
   local Stub = require("stub.hyprland")
   H.boot()
