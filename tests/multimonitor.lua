@@ -18,6 +18,17 @@ H.scenario("Super+Shift+O carries the whole focused column to the next monitor, 
   H.expect_no_duplicates()
 end)
 
+H.scenario("the roam column (Super+0, renamed 10 -> \"0\") still moves across monitors", function()
+  local Stub = require("stub.hyprland")
+  H.boot()
+  Stub.seed_window("0", "DP-2", 10)                       -- shown as "0", real id 10, on the MIDDLE monitor
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:0" }))
+  H.press("SUPER + SHIFT + Y")                            -- move the column left
+  H.eq((H.workspaces())["0"].mon, "DP-1", "roam moved left to DP-1")
+  H.press("SUPER + SHIFT + O")                            -- and back right
+  H.eq((H.workspaces())["0"].mon, "DP-2", "roam moved right to DP-2")
+end)
+
 H.scenario("a split column auto-heals: a stray tag rejoins its column's monitor", function()
   H.boot()
   H.press(super_n(1)); H.open("1")

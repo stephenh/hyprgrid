@@ -132,9 +132,9 @@ local function heal_split_columns()
     anchor[col] = best
   end
   for _, ws in ipairs(hl.get_workspaces()) do
-    local col, row = cell_of(ws.name)
+    local col = cell_of(ws.name)
     if col and ws.monitor and anchor[col] and ws.monitor.name ~= anchor[col] then
-      hl.dispatch(hl.dsp.workspace.move({ workspace = selector_for(col, row), monitor = anchor[col] }))
+      hl.dispatch(hl.dsp.workspace.move({ workspace = "name:" .. ws.name, monitor = anchor[col] }))
     end
   end
   if origin then hl.dispatch(hl.dsp.focus({ monitor = origin })) end
@@ -309,14 +309,17 @@ local function move_column_to_monitor(dir)
   -- dispatch only bounces us back off the destination, leaving the column hidden behind its old window.
   local active_name = (hl.get_active_workspace() or {}).name
   relocating = true -- this move is deliberate; keep heal_split_columns from fighting the transient split
+  -- Move each workspace by its actual name (`name:<name>`), not a column-derived selector. A bare selector
+  -- resolves by workspace NUMBER, so a workspace renamed away from its number (Super+0's id-10 shown as "0")
+  -- wouldn't be found by "0" -- name: matches the name and always resolves an existing workspace.
   for _, ws in ipairs(hl.get_workspaces()) do
-    local c, r = cell_of(ws.name)
+    local c = cell_of(ws.name)
     if c == col and ws.name ~= active_name then
-      hl.dispatch(hl.dsp.workspace.move({ workspace = selector_for(c, r), monitor = target }))
+      hl.dispatch(hl.dsp.workspace.move({ workspace = "name:" .. ws.name, monitor = target }))
     end
   end
   if active_name then
-    hl.dispatch(hl.dsp.workspace.move({ workspace = selector_for(cell_of(active_name)), monitor = target }))
+    hl.dispatch(hl.dsp.workspace.move({ workspace = "name:" .. active_name, monitor = target }))
   end
   relocating = false
 end

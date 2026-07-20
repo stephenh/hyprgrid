@@ -170,6 +170,24 @@ local function focus_workspace(name)
 end
 
 -- ------------------------------------------------------------------ dispatchers
+-- Keep a selector as-is (only stringify numbers) so a "name:" prefix survives to resolution. I.e. 10 -> "10".
+local function norm(sel) return type(sel) == "string" and sel or tostring(sel) end
+
+-- Resolve a workspace selector the way Hyprland does for an EXISTING workspace: "name:X" matches by NAME; a
+-- bare number matches by workspace ID/NUMBER (not by name); anything else by name. So a numbered workspace
+-- renamed via default_name (e.g. id 10 shown as "0") is found by name:0 or by its id 10, but NOT by a bare
+-- "0" -- which is why moving the roam column via its name broke once it was renamed 10 -> "0".
+local function resolve(sel)
+  local nm = sel:match("^name:(.+)$")
+  if nm then return Stub._find(nm) end
+  if sel:match("^%d+$") then
+    local id = tonumber(sel)
+    for _, w in ipairs(S.workspaces) do if w.id == id then return w end end
+    return nil
+  end
+  return Stub._find(sel)
+end
+
 -- hl.dsp.* return opaque descriptors; hl.dispatch interprets them against the model.
 local function apply(desc)
   local op = desc.op
@@ -182,7 +200,7 @@ local function apply(desc)
       focus_workspace(desc.workspace)
     end
   elseif op == "ws_move" then -- moveworkspacetomonitor
-    local w = Stub._find(desc.workspace)
+    local w = resolve(desc.workspace)
     if w then
       local was_global_active = (focused_monitor() and focused_monitor().active == w.name)
       -- if the monitor it left now shows nothing meaningful, give it another/ fresh workspace
@@ -254,7 +272,7 @@ hl.dsp = {
   end,
   exec_cmd = function(cmd) return { op = "exec", cmd = cmd } end,
   workspace = {
-    move = function(a) return { op = "ws_move", workspace = sel_name(a.workspace), monitor = a.monitor } end,
+    move = function(a) return { op = "ws_move", workspace = norm(a.workspace), monitor = a.monitor } end,
     rename = function(a) return { op = "ws_rename", workspace = sel_name(a.workspace), newname = sel_name(a.name) } end,
   },
   window = {
@@ -326,8 +344,10 @@ Stub.set_desc = function(key, text) S.desc[key] = text end
 Stub.get_desc = function(key) return S.desc[key] end
 -- Seed a window onto a workspace WITHOUT firing window.open (for building a state before triggering
 -- reconcile). Creates the workspace on `monitor` if missing. Returns the window address.
-Stub.seed_window = function(ws, monitor)
-  if not Stub._find(ws) then Stub._create(ws, monitor or focused_monitor().name) end
+Stub.seed_window = function(ws, monitor, id)
+  local w = Stub._find(ws)
+  if not w then w = Stub._create(ws, monitor or focused_monitor().name) end
+  if id then w.id = id end -- model a numbered ws renamed via default_name (id 10 shown as "0")
   S.next_addr = S.next_addr + 1
   local addr = string.format("0x%x", S.next_addr)
   S.windows[#S.windows + 1] = { addr = addr, ws = ws }

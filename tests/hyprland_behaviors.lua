@@ -50,6 +50,19 @@ H.scenario("behavior: renaming an EMPTY workspace disposes it (persistent rule i
   H.expect_absent("2c"); H.expect_absent("2b")    -- rename dropped persistence -> empty -> gone
 end)
 
+H.scenario("behavior: a bare-number move selector resolves by workspace ID, not name (name: matches name)", function()
+  local Stub = require("stub.hyprland")
+  H.boot_bare()
+  -- A workspace shown as "0" whose real id is still 10 (Super+0's workspace, renamed via default_name).
+  Stub.seed_window("0", "DP-1", 10)
+  hl.dispatch(hl.dsp.workspace.move({ workspace = "0", monitor = "DP-2" }))       -- bare "0" == number 0 (none)
+  H.eq((H.workspaces())["0"].mon, "DP-1", "bare '0' does not resolve the id-10 workspace -> no move")
+  hl.dispatch(hl.dsp.workspace.move({ workspace = "name:0", monitor = "DP-2" }))  -- by name -> resolves
+  H.eq((H.workspaces())["0"].mon, "DP-2", "name:0 resolves by name -> moved")
+  hl.dispatch(hl.dsp.workspace.move({ workspace = "10", monitor = "DP-1" }))      -- by id 10 -> resolves
+  H.eq((H.workspaces())["0"].mon, "DP-1", "bare '10' resolves by id 10 -> moved back")
+end)
+
 H.scenario("behavior: renaming onto an existing name yields a DUPLICATE (the 2a disaster)", function()
   H.boot_bare()
   -- two windowed workspaces, 2a and 2b, both survive a rename; rename 2b -> 2a with 2a still present
