@@ -357,6 +357,7 @@ local function walk(delta)
   hl.dispatch(hl.dsp.focus({ workspace = selector_for(tostring(target.col), target.row) }))
 end
 
+hl.unbind("SUPER + CTRL + K") -- was Herdr keybindings
 hl.bind("SUPER + CTRL + K", function() go_row(-1) end, { description = "Grid row up (all monitors)", repeating = true })
 hl.bind("SUPER + CTRL + J", function() go_row(1) end, { description = "Grid row down (all monitors)", repeating = true })
 hl.bind("SUPER + CTRL + SHIFT + K", function() move_row(-1) end, { description = "Move window up a task (all monitors follow)" })
@@ -366,10 +367,14 @@ hl.unbind("SUPER + CTRL + L") -- was "Lock system" (omarchy default); walk right
 hl.bind("SUPER + CTRL + L", function() walk(1) end, { description = "Walk to next workspace (grid order)", repeating = true })
 hl.bind("SUPER + CTRL + H", function() walk(-1) end, { description = "Walk to previous workspace (grid order)", repeating = true })
 -- Whole-column moves across monitors (defined here, not bindings.lua, so they can carry every grid tag).
+hl.unbind("SUPER + SHIFT + Y") -- was YouTube
+hl.unbind("SUPER + SHIFT + O") -- was Obsidian
 o.bind("SUPER + SHIFT + Y", "Move column to monitor on left", function() move_column_to_monitor("l") end)
 o.bind("SUPER + SHIFT + O", "Move column to monitor on right", function() move_column_to_monitor("r") end)
 for row = 1, MAX_ROWS do
-  hl.bind("SUPER + CTRL + code:" .. tostring(row + 9), function() jump_row(row) end,
+  local key = "SUPER + CTRL + code:" .. tostring(row + 9)
+  hl.unbind(key) -- was Bar panel N
+  hl.bind(key, function() jump_row(row) end,
     { description = "Jump to grid row " .. row .. " (all monitors)" })
 end
 
@@ -421,4 +426,3 @@ heal_split_columns()
 -- for id, label in pairs(columns) do
 --   hl.workspace_rule({ workspace = id, default_name = label, persistent = true })
 -- end
-

@@ -1,6 +1,9 @@
 # Waybar: per-monitor task descriptions
 
-This is the waybar half of hyprgrid. It shows, **on each monitor's bar**, the description of the
+This integration is for systems that still run Waybar. Omarchy Quattro users should install the
+[Quattro workspace widget](../quattro/README.md) instead.
+
+This is the Waybar half of hyprgrid. It shows, **on each monitor's bar**, the description of the
 workspace that monitor is currently displaying:
 
 - A monitor on a **home workspace** shows that column's own label — `1 → IDE`, `2 → terminal`,

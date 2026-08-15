@@ -45,19 +45,21 @@ The killer features of hyprgrid are key binds & Lua routines to:
 
 - **Lock-step task switching** across every monitor at once (columns not in the grid are left alone).
 - **Self-compacting tasks:** empty a task's row and it's squeezed out; the higher tasks renumber down to stay
-  contiguous (`c→b`, `d→c`) across all columns simultaneously — and each task's **description rides along**
-  with it.
+  contiguous (`c→b`, `d→c`) across all columns simultaneously. With the Waybar description helper, each
+  task's **description rides along** with it.
 - **Split-healing:** if a resume, monitor hotplug, or tag close scatters a column's workspaces across
   monitors, they rejoin their monitor (a compaction heals any split it would otherwise leave behind).
 - **Move a whole task/column across monitors**, and **move a single window between tasks**.
-- Per-task **descriptions** in waybar via `~/.local/bin/hypr-ws-desc`.
+- Named grid workspaces in the **Omarchy Quattro bar** via the included `hyprgrid.workspaces` plugin.
+- Per-task **descriptions** in Waybar via `~/.local/bin/hypr-ws-desc` on systems that still use Waybar.
 
 `workspace-grid.lua` is the whole implementation. It lives in `~/.config/hypr/` and is kept byte-for-byte in
 sync with the copy in this repo.
 
 ## Install
 
-hyprgrid runs on **Hyprland's native Lua config**. The task descriptions also use `jq` and waybar. Omarchy ships all three.
+hyprgrid runs on **Hyprland's native Lua config**. It supports Omarchy Quattro's Quickshell bar and older
+Waybar-based setups.
 
 **1. The grid.** Drop the script in and load it from your Lua entrypoint:
 
@@ -72,15 +74,20 @@ require("hypr.workspace-grid")
 `hyprctl reload`, and the [keybinds](#keybinds) below are live. The number of tasks is the single knob at
 the top of the script — `MAX_ROWS = 9` gives tags `a..h` (8 tasks); bump it for more.
 
-**2. Descriptions in waybar.** The per-monitor task labels are a small separate piece — the `hypr-ws-desc`
-script, a defaults file, and a one-bar-per-monitor waybar config. See **[waybar/README.md](waybar/README.md)**
-for the wiring.
+**2. Show grid workspaces in the bar.** Choose the integration for your system:
 
-**3. Agent-done alerts (optional).** Make a task's workspace **pulse in waybar** when a Claude Code or
-opencode agent finishes in an unfocused window (terminal bell → Hyprland urgent). See
+- **Omarchy Quattro:** install the included `hyprgrid.workspaces` shell plugin so named workspaces such as
+  `2a`, `2b`, and `3b` appear alongside numbered workspaces. See **[quattro/README.md](quattro/README.md)**.
+- **Waybar / pre-Quattro Omarchy:** install the `hypr-ws-desc` script, defaults file, and per-monitor Waybar
+  config. See **[waybar/README.md](waybar/README.md)**.
+
+**3. Agent-done alerts (optional, Waybar).** Make a task's workspace **pulse in Waybar** when a Claude Code
+or opencode agent finishes in an unfocused window (terminal bell → Hyprland urgent). See
 **[notify/README.md](notify/README.md)**.
 
-### Workspace defaults
+### Waybar description defaults
+
+These defaults apply only when the [Waybar description integration](waybar/README.md) is installed.
 
 - **Columns are just the standard numbered workspaces.** Home columns `1..9` are Hyprland/Omarchy's default
   `Super+1..9` workspaces — hyprgrid only adds the vertical (tag) axis on top.
@@ -111,7 +118,7 @@ opencode agent finishes in an unfocused window (terminal bell → Hyprland urgen
 | `Super+Ctrl+Shift+J` / `…+K` | Move the focused window **down / up a task** — every monitor follows in lock-step, carrying the window |
 | `Super+Ctrl+L` / `Super+Ctrl+H` | Walk to the next / previous workspace in grid order |
 | `Super+Shift+O` / `Super+Shift+Y` | Move the whole column to the monitor on the right / left |
-| `Super+D` | Set the current task's description |
+| `Super+D` | Set the current task's Waybar description (when installed) |
 
 ## Developing & testing
 

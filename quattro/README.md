@@ -1,0 +1,57 @@
+# Omarchy Quattro workspace widget
+
+Omarchy Quattro replaced Waybar with the Quickshell-based Omarchy shell. Its stock
+`omarchy.workspaces` widget only displays numbered workspace IDs `1..10`; Hyprland gives named
+workspaces such as `2a` and `3b` negative IDs, so the stock widget omits hyprgrid cells.
+
+`hyprgrid.workspaces` replaces that widget and:
+
+- displays live numbered and hyprgrid workspaces, including `2a`, `2b`, and `3b`;
+- sorts them by column and task (`2`, `2a`, `2b`, `3`);
+- keeps the active workspace name visible and uses the bar's active color;
+- focuses named workspaces correctly when clicked;
+- updates when Hyprland creates or removes a workspace.
+
+Like Waybar, it only shows named workspaces that currently exist. The numbered `1..5` buttons remain
+visible as Omarchy's stock widget does.
+
+## Install
+
+Copy the plugin into the user-owned Omarchy plugin directory:
+
+```sh
+mkdir -p ~/.config/omarchy/plugins/hyprgrid.workspaces
+cp quattro/hyprgrid.workspaces/manifest.json quattro/hyprgrid.workspaces/Workspaces.qml \
+  ~/.config/omarchy/plugins/hyprgrid.workspaces/
+```
+
+Ask the running shell to discover and enable it, then restart the shell:
+
+```sh
+omarchy-shell shell rescanPlugins
+omarchy plugin enable hyprgrid.workspaces
+omarchy restart shell
+```
+
+The manifest's `clonedFrom: "omarchy.workspaces"` metadata makes Omarchy replace the stock workspace
+widget in its current bar position. The explicit restart is important: Quattro can retain the already
+instantiated stock widget after a hot plugin rescan.
+
+To update an existing installation, copy the two files again and run `omarchy restart shell`.
+
+## Remove
+
+Disabling the plugin restores `omarchy.workspaces` in the same bar position:
+
+```sh
+omarchy plugin disable hyprgrid.workspaces
+rm -rf ~/.config/omarchy/plugins/hyprgrid.workspaces
+omarchy-shell shell rescanPlugins
+omarchy restart shell
+```
+
+## Task descriptions
+
+This widget displays workspace names. It does not yet port Waybar's separate per-monitor task-description
+module (`hypr-ws-desc show <MON>`) to Quattro. The grid and task compaction work without that module; use
+the [Waybar integration](../waybar/README.md) only on systems that still run Waybar.
