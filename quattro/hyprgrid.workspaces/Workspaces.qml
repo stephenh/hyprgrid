@@ -141,6 +141,7 @@ BarWidget {
 
           bar: root.bar
           text: workspaceName
+          labelVisible: false
           active: focused || urgent
           opacity: occupied || focused || urgent ? 1 : 0.5
           horizontalMargin: 6
@@ -148,6 +149,15 @@ BarWidget {
           fixedWidth: root.vertical ? root.barSize : -1
           fixedHeight: root.barSize
           onPressed: function() { root.focusWorkspace(workspaceName) }
+
+          Text {
+            anchors.centerIn: parent
+            text: workspaceButton.text
+            color: workspaceButton.active ? workspaceButton.activeColor : workspaceButton.foreground
+            font.family: workspaceButton.fontFamily
+            font.pixelSize: workspaceButton.fontSize
+            renderType: Text.NativeRendering
+          }
 
           Rectangle {
             id: urgentIndicator

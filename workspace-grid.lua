@@ -28,6 +28,10 @@ local relocating = false
 -- detour; nil until a grid workspace is focused. Home visits deliberately do not clear it.
 local current_row = nil
 
+-- Active grid row recorded at window.close, keyed by address until window.destroy. Hyprland falls back to
+-- the home workspace between those events when the closing window was the workspace's last one.
+local closing_rows = {}
+
 -- Parse a workspace name into (home column, row). Row 1 is the home workspace; rows 2+ are grid
 -- workspaces (row 2 = tag "a"). I.e. "2b" -> ("2", 3), "2" -> ("2", 1); nil if neither home nor grid.
 local function cell_of(name)
@@ -189,8 +193,9 @@ end
 -- Renaming a windowed workspace carries its windows, but renaming onto a name that is still on screen makes
 -- a DUPLICATE (the "two 2a" bug). So we first PARK every monitor on its home column -- now no grid cell is
 -- visible, the empty ones dispose, and the renames below have free targets -- then bring the monitors back
--- onto the (now compacted) tag they were on. Runs on window open/close.
-local function reconcile_tags()
+-- onto the (now compacted) tag they were on. `closed_row` preserves the viewed row across Hyprland's
+-- automatic home fallback after closing the last window. Runs on window open/close.
+local function reconcile_tags(closed_row)
   if reconciling then return end
   reconciling = true
 
@@ -209,6 +214,7 @@ local function reconcile_tags()
 
   local origin = focused_monitor()
   local _, frow = current_cell()
+  if frow == 1 and closed_row then frow = closed_row end
 
   -- park every monitor on its home column so no grid cell stays visible during the renames
   syncing = true
@@ -407,7 +413,17 @@ end)
 -- column. The removed workspace is already gone from hl.get_workspaces() by the time this fires, so
 -- we can renumber the survivors synchronously. Skipped mid-sync so lock-step isn't pulled off its row.
 hl.on("window.open", function() if not syncing then reconcile_tags() end end)
-hl.on("window.destroy", function() if not syncing then reconcile_tags() end end)
+hl.on("window.close", function(window)
+  local _, row = cell_of(window and window.workspace and window.workspace.name)
+  local _, active_row = current_cell()
+  if row and row >= 2 and row == active_row and window.address then closing_rows[window.address] = row end
+end)
+hl.on("window.destroy", function(window)
+  local address = window and window.address
+  local closed_row = address and closing_rows[address] or nil
+  if address then closing_rows[address] = nil end
+  if not syncing then reconcile_tags(closed_row) end
+end)
 -- Re-consolidate columns shortly after anything that can split them: a workspace changing monitors (a
 -- stray move, a numbered-workspace reassignment) or the output layout changing (sleep/resume, hotplug,
 -- which is what drifts a home workspace away from its tags).

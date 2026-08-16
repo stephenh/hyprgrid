@@ -49,6 +49,8 @@ These live as tests in `tests/hyprland_behaviors.lua` — the stub is only usefu
 
 - A monitor always shows one workspace; the focused monitor's is the global active workspace.
 - **Empty, non-persistent workspaces are disposed the instant they stop being visible** (fires `workspace.removed`).
+- Closing the last window on a visible grid workspace falls back to its numbered home before
+  `window.destroy`; `window.close` still identifies the grid workspace.
 - **Focusing a workspace that doesn't exist creates it** on the focused monitor.
 - **Renaming onto an existing name produces a duplicate** — the "two `2a` workspaces" disaster.
 - **Renaming drops the (name-keyed) persistent rule**, so renaming an *empty* workspace disposes it; a

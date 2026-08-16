@@ -44,6 +44,21 @@ H.scenario("compacting the tag you're VIEWING must not create a duplicate (the 2
   H.eq(H.desc("a"), "beta", "description shifted up with the content")
 end)
 
+H.scenario("closing the viewed middle tag follows the higher tag renamed into its place", function()
+  H.boot()
+  H.press(super_n(2))
+  fill_tags({ "alpha", "beta", "gamma" })
+  H.press("SUPER + CTRL + K")                 -- 2c -> 2b
+  H.expect_active("DP-2", "2b")
+
+  H.close_all_on("2b")                       -- 2c -> 2b, and focus must follow it
+
+  H.expect_active("DP-2", "2b")
+  H.expect_windows("2a", 1); H.expect_windows("2b", 1)
+  H.expect_absent("2c")
+  H.expect_no_duplicates()
+end)
+
 H.scenario("a tag is NOT compacted while another column still holds a window in it", function()
   H.boot()
   -- column 1 (DP-1): tags a and c windowed; column 2 (DP-2): tag b windowed -> every row a,b,c is occupied
@@ -57,7 +72,8 @@ H.scenario("a tag is NOT compacted while another column still holds a window in 
   H.eq((H.workspaces())["2b"] and (H.workspaces())["2b"].win or 0, 1, "2b has a window")
 
   H.close_all_on("1b")                                 -- 1b empties, but 2b still holds tag b
-  H.expect_exists("1b")                                -- tag b survives (row not fully empty)  -- OR renumber-safe
+  H.expect_absent("1b")                                -- empty inactive cells are disposed
+  H.expect_exists("1c"); H.expect_exists("2b")        -- but row b remains and row c does not shift
   H.expect_no_duplicates()
 end)
 

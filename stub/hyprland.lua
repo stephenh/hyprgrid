@@ -7,6 +7,8 @@
 --     is the global active workspace.
 --   * Empty, non-persistent workspaces are disposed (garbage-collected) the moment they stop being visible
 --     (i.e. are not the active workspace of any monitor). Disposal fires `workspace.removed`.
+--   * Closing the last window on a visible grid workspace falls back to its numbered home before
+--     `window.destroy` fires, while `window.close` can still identify the workspace being closed.
 --   * Numbered home workspaces ("1".."10") get positive ids; named grid tags ("2a") get negative ids --
 --     which is why a negative number is NOT a usable id selector (it reads as a relative offset).
 --   * Focusing a workspace that does not exist CREATES it (empty) on the focused monitor.
@@ -374,9 +376,38 @@ Stub.open_window = function(ws)
   return addr
 end
 Stub.close_window = function(addr)
-  for i, x in ipairs(S.windows) do if x.addr == addr then table.remove(S.windows, i); break end end
+  local window, window_index
+  for i, x in ipairs(S.windows) do
+    if x.addr == addr then window, window_index = x, i; break end
+  end
+  if not window then return end
+
+  local workspace = Stub._find(window.ws)
+  local event = {
+    address = addr,
+    workspace = workspace and { name = workspace.name, active = is_visible(workspace.name) } or nil,
+    monitor = workspace and {
+      name = workspace.monitor,
+      focused = focused_monitor() and focused_monitor().name == workspace.monitor,
+    } or nil,
+  }
+  fire("window.close", event)
+  table.remove(S.windows, window_index)
   refresh_counts()
-  fire("window.destroy", { address = addr })
+
+  if workspace and workspace.windows == 0 and is_named(workspace.name) then
+    local home_name = workspace.name:match("^(%d+)")
+    for _, monitor in ipairs(S.monitors) do
+      if monitor.active == workspace.name then
+        local home = Stub._find(home_name) or Stub._create(home_name, monitor.name)
+        monitor.active = home.name
+        fire("workspace.active", home)
+      end
+    end
+  end
+
+  gc()
+  fire("window.destroy", event)
   gc()
 end
 Stub.add_monitor = function(name, x)

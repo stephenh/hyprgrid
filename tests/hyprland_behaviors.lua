@@ -19,6 +19,28 @@ H.scenario("behavior: an empty non-persistent workspace is GC'd when it stops be
   H.expect_absent("2a")
 end)
 
+H.scenario("behavior: closing the last active window falls back home before window.destroy", function()
+  local Stub = require("stub.hyprland")
+  H.boot_bare({ { name = "DP-1", x = 0, home = "2" } })
+  local address = Stub.seed_window("2b", "DP-1")
+  hl.dispatch(hl.dsp.focus({ workspace = "name:2b" }))
+  local active_at_close, active_at_destroy, destroyed_workspace
+  hl.on("window.close", function(window)
+    active_at_close = hl.get_active_workspace().name
+    destroyed_workspace = window.workspace.name
+  end)
+  hl.on("window.destroy", function()
+    active_at_destroy = hl.get_active_workspace().name
+  end)
+
+  H.close(address)
+
+  H.eq(active_at_close, "2b", "workspace at window.close")
+  H.eq(active_at_destroy, "2", "workspace at window.destroy")
+  H.eq(destroyed_workspace, "2b", "destroyed window's workspace")
+  H.expect_absent("2b")
+end)
+
 H.scenario("behavior: a persistent empty workspace survives when not visible", function()
   H.boot_bare()
   hl.workspace_rule({ workspace = "name:2a", persistent = true, monitor = "DP-1" })
