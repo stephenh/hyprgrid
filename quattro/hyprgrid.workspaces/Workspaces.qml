@@ -1,12 +1,40 @@
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
 BarWidget {
   id: root
   moduleName: "hyprgrid.workspaces"
+
+  readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state"
+  readonly property string descriptionsPath: stateHome + "/hypr/workspace-descriptions.json"
+  readonly property var monitor: root.QsWindow.window ? Hyprland.monitorFor(root.QsWindow.window.screen) : null
+  readonly property var activeWorkspace: monitor && monitor.activeWorkspace ? monitor.activeWorkspace : Hyprland.focusedWorkspace
+  readonly property string activeDescription: {
+    if (!activeWorkspace) return ""
+    var value = descriptions[descriptionKey(activeWorkspace.name)]
+    return value === undefined || value === null ? "" : String(value)
+  }
+  property var descriptions: ({})
+
+  function descriptionKey(name) {
+    var match = String(name || "").match(/^\d+([a-z]+)$/)
+    return match ? match[1] : String(name || "")
+  }
+
+  function loadDescriptions(content) {
+    try {
+      var parsed = JSON.parse(String(content || ""))
+      descriptions = parsed && typeof parsed === "object" ? parsed : ({})
+    } catch (error) {
+      console.warn("hyprgrid.workspaces", "Ignoring invalid workspace descriptions", descriptionsPath, error)
+      descriptions = ({})
+    }
+  }
 
   function workspaceByName(name) {
     var values = Hyprland.workspaces.values
@@ -55,14 +83,30 @@ BarWidget {
 
   readonly property real trailingGap: root.vertical ? 0 : Style.spaceReal(1.5)
 
-  implicitWidth: grid.implicitWidth + trailingGap
-  implicitHeight: grid.implicitHeight
+  implicitWidth: content.implicitWidth + trailingGap
+  implicitHeight: content.implicitHeight
 
   Component.onCompleted: rebuildWorkspaceModel()
+
+  FileView {
+    path: root.descriptionsPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.loadDescriptions(text())
+    onFileChanged: reload()
+    onLoadFailed: root.descriptions = ({})
+  }
 
   Connections {
     target: Hyprland.workspaces
     function onValuesChanged() { root.rebuildWorkspaceModel() }
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (event && event.name === "renameworkspace") root.rebuildWorkspaceModel()
+    }
   }
 
   ListModel {
@@ -70,33 +114,74 @@ BarWidget {
   }
 
   GridLayout {
-    id: grid
+    id: content
     anchors.fill: parent
     anchors.rightMargin: root.trailingGap
-    columns: root.vertical ? 1 : workspaceModel.count
+    columns: root.vertical ? 1 : 2
     columnSpacing: root.vertical ? 0 : Style.space(1)
-    rowSpacing: root.vertical ? Style.space(2) : 0
+    rowSpacing: root.vertical ? Style.space(1) : 0
 
-    Repeater {
-      model: workspaceModel
+    GridLayout {
+      id: grid
+      columns: root.vertical ? 1 : workspaceModel.count
+      columnSpacing: root.vertical ? 0 : Style.space(1)
+      rowSpacing: root.vertical ? Style.space(2) : 0
 
-      WidgetButton {
-        required property string workspaceName
+      Repeater {
+        model: workspaceModel
 
-        readonly property var workspace: root.workspaceByName(workspaceName)
-        readonly property bool occupied: workspace !== null && workspace.toplevels.values.length > 0
-        readonly property bool focused: Hyprland.focusedWorkspace !== null && Hyprland.focusedWorkspace.name === workspaceName
+        WidgetButton {
+          id: workspaceButton
+          required property string workspaceName
 
-        bar: root.bar
-        text: workspaceName
-        active: focused
-        opacity: occupied || focused ? 1 : 0.5
-        horizontalMargin: 6
-        verticalPadding: 6
-        fixedWidth: root.vertical ? root.barSize : -1
-        fixedHeight: root.barSize
-        onPressed: function() { root.focusWorkspace(workspaceName) }
+          readonly property var workspace: root.workspaceByName(workspaceName)
+          readonly property bool occupied: workspace !== null && workspace.toplevels.values.length > 0
+          readonly property bool focused: root.activeWorkspace !== null && root.activeWorkspace.name === workspaceName
+          readonly property bool urgent: workspace !== null && workspace.urgent
+
+          bar: root.bar
+          text: workspaceName
+          active: focused || urgent
+          opacity: occupied || focused || urgent ? 1 : 0.5
+          horizontalMargin: 6
+          verticalPadding: 6
+          fixedWidth: root.vertical ? root.barSize : -1
+          fixedHeight: root.barSize
+          onPressed: function() { root.focusWorkspace(workspaceName) }
+
+          Rectangle {
+            id: urgentIndicator
+            visible: workspaceButton.urgent
+            color: workspaceButton.activeColor
+            width: root.vertical ? 2 : parent.width
+            height: root.vertical ? parent.height : 2
+            x: root.vertical ? parent.width - width : 0
+            y: root.vertical ? 0 : parent.height - height
+            opacity: 0.2
+
+            SequentialAnimation on opacity {
+              running: urgentIndicator.visible
+              loops: Animation.Infinite
+              NumberAnimation { from: 0.2; to: 1; duration: 450; easing.type: Easing.InOutCubic }
+              NumberAnimation { from: 1; to: 0.2; duration: 450; easing.type: Easing.InOutCubic }
+            }
+          }
+        }
       }
+    }
+
+    WidgetButton {
+      bar: root.bar
+      text: root.activeDescription
+      interactive: false
+      pressable: false
+      useActiveColor: false
+      dimmed: true
+      horizontalMargin: 10
+      verticalPadding: 6
+      fixedWidth: root.vertical ? root.barSize : -1
+      fixedHeight: root.barSize
+      textRotation: root.vertical ? -90 : 0
     }
   }
 }

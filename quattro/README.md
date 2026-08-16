@@ -9,15 +9,26 @@ workspaces such as `2a` and `3b` negative IDs, so the stock widget omits hyprgri
 - displays live numbered and hyprgrid workspaces, including `2a`, `2b`, and `3b`;
 - sorts them by column and task (`2`, `2a`, `2b`, `3`);
 - keeps the active workspace name visible and uses the bar's active color;
+- shows each monitor's active workspace or task description;
+- pulses urgent workspaces until they are focused;
 - focuses named workspaces correctly when clicked;
-- updates when Hyprland creates or removes a workspace.
+- updates when Hyprland creates, removes, or renames a workspace.
 
 Like Waybar, it only shows named workspaces that currently exist. The numbered `1..5` buttons remain
 visible as Omarchy's stock widget does.
 
 ## Install
 
-Copy the plugin into the user-owned Omarchy plugin directory:
+Run the installer from the repository root:
+
+```sh
+./quattro/install.sh
+```
+
+It installs or updates the plugin under `$XDG_CONFIG_HOME` (or `~/.config` when unset), asks the running shell
+to discover and enable it, and restarts the shell.
+
+To install it manually, copy the plugin into the user-owned Omarchy plugin directory:
 
 ```sh
 mkdir -p ~/.config/omarchy/plugins/hyprgrid.workspaces
@@ -37,7 +48,7 @@ The manifest's `clonedFrom: "omarchy.workspaces"` metadata makes Omarchy replace
 widget in its current bar position. The explicit restart is important: Quattro can retain the already
 instantiated stock widget after a hot plugin rescan.
 
-To update an existing installation, copy the two files again and run `omarchy restart shell`.
+To update an existing installation, run `./quattro/install.sh` again.
 
 ## Remove
 
@@ -52,6 +63,8 @@ omarchy restart shell
 
 ## Task descriptions
 
-This widget displays workspace names. It does not yet port Waybar's separate per-monitor task-description
-module (`hypr-ws-desc show <MON>`) to Quattro. The grid and task compaction work without that module; use
-the [Waybar integration](../waybar/README.md) only on systems that still run Waybar.
+The widget watches `${XDG_STATE_HOME:-$HOME/.local/state}/hypr/workspace-descriptions.json`, the same store
+managed by `hypr-ws-desc`. Numbered home workspaces use their number as the description key, while grid
+workspaces use their shared task tag (`2a` uses `a`). Tag descriptions therefore follow compaction when the
+grid remaps the store. See the [Waybar integration](../waybar/README.md) for the description helper and
+defaults.

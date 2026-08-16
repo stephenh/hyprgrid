@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "hyprgrid.workspaces",
   "name": "Hyprgrid Workspaces",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "hyprgrid",
-  "description": "Workspace indicators for numbered and hyprgrid workspaces",
+  "description": "Grid workspaces with descriptions and urgent state",
   "kinds": [
     "bar-widget"
   ],
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "Hyprgrid Workspaces",
-    "description": "Numbered and hyprgrid workspace indicators",
+    "description": "Grid workspaces with descriptions and urgent state",
     "category": "Compositor",
     "allowMultiple": false,
     "defaultSection": "left"
