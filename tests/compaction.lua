@@ -21,6 +21,7 @@ H.scenario("empty lower tag is squeezed out; higher tags + their descriptions sh
   H.press("SUPER + CTRL + K"); H.press("SUPER + CTRL + K"); H.press("SUPER + CTRL + K") -- back to home (not viewing a tag)
 
   H.close_all_on("1a")                      -- tag a empties -> compact: b->a, c->b, drop c
+  H.timers()
 
   H.expect_absent("1c")
   H.expect_windows("1a", 1); H.expect_windows("1b", 1)
@@ -38,24 +39,28 @@ H.scenario("compacting the tag you're VIEWING must not create a duplicate (the 2
   H.expect_active("DP-1", "1a")
 
   H.close_all_on("1a")                      -- empty the very tag we're looking at
+  H.timers()
 
   H.expect_no_duplicates()                  -- the whole point
   H.expect_windows("1a", 1)                 -- b's content shifted up into a
   H.eq(H.desc("a"), "beta", "description shifted up with the content")
 end)
 
-H.scenario("closing the viewed middle tag follows the higher tag renamed into its place", function()
+H.scenario("closing viewed 2c with 2a through 2d open defers compaction and follows renamed 2d", function()
   H.boot()
   H.press(super_n(2))
-  fill_tags({ "alpha", "beta", "gamma" })
-  H.press("SUPER + CTRL + K")                 -- 2c -> 2b
-  H.expect_active("DP-2", "2b")
+  fill_tags({ "alpha", "beta", "gamma", "delta" })
+  H.press("SUPER + CTRL + K")                 -- 2d -> 2c
+  H.expect_active("DP-2", "2c")
 
-  H.close_all_on("2b")                       -- 2c -> 2b, and focus must follow it
+  H.close_all_on("2c")                       -- 2d will become 2c after the destroy callback returns
 
-  H.expect_active("DP-2", "2b")
-  H.expect_windows("2a", 1); H.expect_windows("2b", 1)
-  H.expect_absent("2c")
+  H.expect_exists("2d")                       -- no workspace rename from inside CWindow::~CWindow
+  H.timers()
+
+  H.expect_active("DP-2", "2c")
+  H.expect_windows("2a", 1); H.expect_windows("2b", 1); H.expect_windows("2c", 1)
+  H.expect_absent("2d")
   H.expect_no_duplicates()
 end)
 
@@ -91,6 +96,7 @@ H.scenario("multi-column: an all-empty tag row renumbers every column together (
   H.close_all_on("1a")            -- 2a still holds tag a -> no compaction yet
   H.expect_exists("1b"); H.expect_exists("2a")
   H.close_all_on("2a")            -- now tag a is empty everywhere -> compact
+  H.timers()
 
   H.expect_absent("1c"); H.expect_absent("2c")
   H.expect_windows("1a", 1); H.expect_windows("1b", 1)

@@ -18,6 +18,8 @@
 --     it non-persistent-and-empty -> it is disposed. A windowed workspace survives a rename.
 --   * `workspace_rule{persistent=true}` creates the workspace if missing; `{persistent=false}` disposes it
 --     if it is empty and not visible.
+--   * `window.destroy` callbacks run from the window destructor. Workspace mutation from that callback is
+--     unsafe; the grid must defer compaction until the callback returns.
 --   * `hl.timer` is deferred; the harness fires timers explicitly (models the debounce delay).
 --
 -- Known NON-fidelity (documented, acceptable for logic testing): everything here is synchronous and
@@ -41,6 +43,7 @@ function Stub.reset(monitors)
     handlers = {},   -- event name -> array of callbacks
     desc = {},       -- description store, keyed by tag ("a") or home name ("2") -- like hypr-ws-desc's json
     timers = {},     -- pending { cb } from hl.timer
+    destroying_window = false,
     next_named_id = -1000,
     next_addr = 0,
     log = {},        -- event log for debugging
@@ -224,6 +227,7 @@ local function apply(desc)
       gc()
     end
   elseif op == "ws_rename" then
+    if S.destroying_window then error("workspace rename dispatched during window.destroy") end
     local w = Stub._find(desc.workspace)
     if w then
       local old = w.name
@@ -407,7 +411,9 @@ Stub.close_window = function(addr)
   end
 
   gc()
+  S.destroying_window = true
   fire("window.destroy", event)
+  S.destroying_window = false
   gc()
 end
 Stub.add_monitor = function(name, x)

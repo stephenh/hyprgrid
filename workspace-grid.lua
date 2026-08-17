@@ -194,7 +194,8 @@ end
 -- a DUPLICATE (the "two 2a" bug). So we first PARK every monitor on its home column -- now no grid cell is
 -- visible, the empty ones dispose, and the renames below have free targets -- then bring the monitors back
 -- onto the (now compacted) tag they were on. `closed_row` preserves the viewed row across Hyprland's
--- automatic home fallback after closing the last window. Runs on window open/close.
+-- automatic home fallback after closing the last window. Event handlers schedule this after Hyprland's
+-- window lifecycle callback returns; workspace mutation from inside CWindow::~CWindow corrupts Hyprland.
 local function reconcile_tags(closed_row)
   if reconciling then return end
   reconciling = true
@@ -256,6 +257,23 @@ local function reconcile_tags(closed_row)
   heal_split_columns()
   hl.exec_cmd("pkill -RTMIN+11 waybar")
   reconciling = false
+end
+
+-- Coalesce window lifecycle events and reconcile only after their native callbacks have returned. In
+-- particular, `window.destroy` is emitted from CWindow::~CWindow, where re-entering workspace focus/rename
+-- can corrupt Hyprland's heap. Keep the latest viewed row so a burst of closes still restores focus.
+local reconcile_scheduled = false
+local reconcile_closed_row = nil
+local function schedule_reconcile(closed_row)
+  if closed_row then reconcile_closed_row = closed_row end
+  if reconcile_scheduled then return end
+  reconcile_scheduled = true
+  hl.timer(function()
+    reconcile_scheduled = false
+    local row = reconcile_closed_row
+    reconcile_closed_row = nil
+    if syncing then schedule_reconcile(row) else reconcile_tags(row) end
+  end, { timeout = 50, type = "oneshot" })
 end
 
 -- Step every locked monitor up/down one row together (creates grid workspaces on demand). I.e.
@@ -410,9 +428,8 @@ hl.on("workspace.active", function(ws)
   hl.exec_cmd("pkill -RTMIN+11 waybar")
 end)
 -- When a grid workspace is removed (e.g. its last window closed), close the tag gap it left in its
--- column. The removed workspace is already gone from hl.get_workspaces() by the time this fires, so
--- we can renumber the survivors synchronously. Skipped mid-sync so lock-step isn't pulled off its row.
-hl.on("window.open", function() if not syncing then reconcile_tags() end end)
+-- column. Defer until the window callback returns, and skip mid-sync so lock-step isn't pulled off its row.
+hl.on("window.open", function() if not syncing then schedule_reconcile() end end)
 hl.on("window.close", function(window)
   local _, row = cell_of(window and window.workspace and window.workspace.name)
   local _, active_row = current_cell()
@@ -422,7 +439,7 @@ hl.on("window.destroy", function(window)
   local address = window and window.address
   local closed_row = address and closing_rows[address] or nil
   if address then closing_rows[address] = nil end
-  if not syncing then reconcile_tags(closed_row) end
+  if not syncing then schedule_reconcile(closed_row) end
 end)
 -- Re-consolidate columns shortly after anything that can split them: a workspace changing monitors (a
 -- stray move, a numbered-workspace reassignment) or the output layout changing (sleep/resume, hotplug,

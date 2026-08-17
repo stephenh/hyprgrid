@@ -46,7 +46,7 @@ H.open = Stub.open_window     -- addr = H.open("2a")  (or H.open() -> on the foc
 H.close = Stub.close_window   -- H.close(addr)
 H.set_desc = Stub.set_desc    -- H.set_desc("b", "beta")   (tag/home key -> label)
 H.desc = Stub.get_desc        -- H.desc("a")
-H.timers = Stub.run_timers    -- fire deferred hl.timer callbacks (heal debounce)
+H.timers = Stub.run_timers    -- fire deferred hl.timer callbacks (compaction and heal debounce)
 
 -- Close every window currently on workspace `ws`.
 function H.close_all_on(ws)

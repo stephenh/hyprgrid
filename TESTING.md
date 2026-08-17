@@ -40,7 +40,7 @@ A test resets it, `loadfile`s the real grid script (so its binds/handlers regist
 - `H.open("2a")` / `H.close(addr)` — add/remove a window, firing `window.open` / `window.destroy`
 - `H.close_all_on("2a")` — empty a workspace; `H.set_desc("b","beta")` / `H.desc("a")` — read/write descriptions
 - `H.add_mon("DP-3", 7680)` / `H.rm_mon(...)` — simulate monitor hotplug / resume
-- `H.timers()` — fire the debounced heal timer
+- `H.timers()` — fire deferred compaction and heal timers
 - assertions: `H.expect_active`, `H.expect_focused`, `H.expect_no_duplicates`, `H.expect_windows`, `H.expect_absent`, …
 
 ## The behaviors it reproduces (each a bug we hit live)
@@ -51,6 +51,8 @@ These live as tests in `tests/hyprland_behaviors.lua` — the stub is only usefu
 - **Empty, non-persistent workspaces are disposed the instant they stop being visible** (fires `workspace.removed`).
 - Closing the last window on a visible grid workspace falls back to its numbered home before
   `window.destroy`; `window.close` still identifies the grid workspace.
+- `window.destroy` callbacks run from the native window destructor, so workspace mutation must wait until
+  the callback returns.
 - **Focusing a workspace that doesn't exist creates it** on the focused monitor.
 - **Renaming onto an existing name produces a duplicate** — the "two `2a` workspaces" disaster.
 - **Renaming drops the (name-keyed) persistent rule**, so renaming an *empty* workspace disposes it; a
@@ -70,8 +72,8 @@ right," still smoke-test a risky change on real windows, and when a new real beh
 
 ## Row-wise tag compaction (built here, tested, live)
 
-`reconcile_tags` implements it: when a tag row is empty in every column, it's squeezed out and the higher tags
-renumber down across all columns, with the shared per-tag descriptions shifting to match. The duplicate-`2a`
+`reconcile_tags` implements it after a short deferred timer: when a tag row is empty in every column, it's
+squeezed out and the higher tags renumber down across all columns, with the shared per-tag descriptions shifting to match. The duplicate-`2a`
 collision that destroyed the live session is reproduced in `tests/compaction.lua` ("compacting the tag you're
 VIEWING") and prevented — before renaming, every monitor is parked on its home column so no empty cell is on
 screen to collide with a rename target. The description shift shells out to `hypr-ws-desc remap OLD=NEW …`

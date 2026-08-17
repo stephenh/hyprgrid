@@ -41,6 +41,24 @@ H.scenario("behavior: closing the last active window falls back home before wind
   H.expect_absent("2b")
 end)
 
+H.scenario("behavior: workspace mutation must wait until window.destroy returns", function()
+  local Stub = require("stub.hyprland")
+  H.boot_bare({ { name = "DP-1", x = 0, home = "2" } })
+  local address = Stub.seed_window("2b", "DP-1")
+  local rename_ok, rename_error
+  hl.on("window.destroy", function()
+    rename_ok, rename_error = pcall(function()
+      hl.dispatch(hl.dsp.workspace.rename({ workspace = "name:2b", name = "2a" }))
+    end)
+  end)
+
+  H.close(address)
+
+  H.eq(rename_ok, false, "workspace rename during window.destroy")
+  H.assert(tostring(rename_error):match("workspace rename dispatched during window.destroy") ~= nil,
+    "expected the destructor-boundary error")
+end)
+
 H.scenario("behavior: a persistent empty workspace survives when not visible", function()
   H.boot_bare()
   hl.workspace_rule({ workspace = "name:2a", persistent = true, monitor = "DP-1" })
