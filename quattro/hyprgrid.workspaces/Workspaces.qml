@@ -59,10 +59,28 @@ BarWidget {
     return names
   }
 
-  function rebuildWorkspaceModel() {
+  function syncWorkspaceModel() {
     var names = root.workspaceNames()
-    workspaceModel.clear()
-    for (var i = 0; i < names.length; i++) workspaceModel.append({ workspaceName: names[i] })
+
+    for (var targetIndex = 0; targetIndex < names.length; targetIndex++) {
+      if (targetIndex >= workspaceModel.count) {
+        workspaceModel.append({ workspaceName: names[targetIndex] })
+        continue
+      }
+
+      if (workspaceModel.get(targetIndex).workspaceName === names[targetIndex]) continue
+
+      var currentIndex = targetIndex + 1
+      while (currentIndex < workspaceModel.count && workspaceModel.get(currentIndex).workspaceName !== names[targetIndex]) currentIndex++
+
+      if (currentIndex < workspaceModel.count) {
+        workspaceModel.move(currentIndex, targetIndex, 1)
+      } else {
+        workspaceModel.insert(targetIndex, { workspaceName: names[targetIndex] })
+      }
+    }
+
+    while (workspaceModel.count > names.length) workspaceModel.remove(workspaceModel.count - 1)
   }
 
   function compareWorkspaceNames(left, right) {
@@ -87,7 +105,7 @@ BarWidget {
   implicitWidth: content.implicitWidth + trailingGap
   implicitHeight: content.implicitHeight
 
-  Component.onCompleted: rebuildWorkspaceModel()
+  Component.onCompleted: syncWorkspaceModel()
 
   FileView {
     path: root.descriptionsPath
@@ -100,13 +118,13 @@ BarWidget {
 
   Connections {
     target: Hyprland.workspaces
-    function onValuesChanged() { root.rebuildWorkspaceModel() }
+    function onValuesChanged() { root.syncWorkspaceModel() }
   }
 
   Connections {
     target: Hyprland
     function onRawEvent(event) {
-      if (event && event.name === "renameworkspace") root.rebuildWorkspaceModel()
+      if (event && event.name === "renameworkspace") root.syncWorkspaceModel()
     }
   }
 
