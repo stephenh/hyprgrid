@@ -13,6 +13,7 @@ BarWidget {
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state"
   readonly property string descriptionsPath: stateHome + "/hypr/workspace-descriptions.json"
   readonly property var monitor: root.QsWindow.window ? Hyprland.monitorFor(root.QsWindow.window.screen) : null
+  readonly property bool monitorFocused: monitor !== null && Hyprland.focusedMonitor !== null && monitor.name === Hyprland.focusedMonitor.name
   readonly property var activeWorkspace: monitor && monitor.activeWorkspace ? monitor.activeWorkspace : Hyprland.focusedWorkspace
   readonly property string activeDescription: {
     if (!activeWorkspace) return ""
@@ -138,6 +139,7 @@ BarWidget {
           readonly property bool occupied: workspace !== null && workspace.toplevels.values.length > 0
           readonly property bool focused: root.activeWorkspace !== null && root.activeWorkspace.name === workspaceName
           readonly property bool urgent: workspace !== null && workspace.urgent
+          readonly property bool current: focused && root.monitorFocused
 
           bar: root.bar
           text: workspaceName
@@ -160,17 +162,17 @@ BarWidget {
           }
 
           Rectangle {
-            id: urgentIndicator
-            visible: workspaceButton.urgent
+            id: workspaceIndicator
+            visible: workspaceButton.urgent || workspaceButton.current
             color: workspaceButton.activeColor
             width: root.vertical ? 2 : parent.width
             height: root.vertical ? parent.height : 2
             x: root.vertical ? parent.width - width : 0
             y: root.vertical ? 0 : parent.height - height
-            opacity: 0.2
+            opacity: workspaceButton.current ? 1 : 0.2
 
             SequentialAnimation on opacity {
-              running: urgentIndicator.visible
+              running: workspaceButton.urgent && !workspaceButton.current
               loops: Animation.Infinite
               NumberAnimation { from: 0.2; to: 1; duration: 450; easing.type: Easing.InOutCubic }
               NumberAnimation { from: 1; to: 0.2; duration: 450; easing.type: Easing.InOutCubic }

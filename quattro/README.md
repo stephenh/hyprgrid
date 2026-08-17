@@ -10,6 +10,7 @@ workspaces such as `2a` and `3b` negative IDs, so the stock widget omits hyprgri
 - sorts them by column and task (`2`, `2a`, `2b`, `3`);
 - keeps the active workspace name visible and uses the bar's active color;
 - shows each monitor's active workspace or task description;
+- underlines the active workspace on the focused monitor;
 - pulses urgent workspaces until they are focused;
 - focuses named workspaces correctly when clicked;
 - updates when Hyprland creates, removes, or renames a workspace.
