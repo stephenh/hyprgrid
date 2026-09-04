@@ -47,11 +47,16 @@ BarWidget {
   }
 
   function workspaceNames() {
-    var names = ["1", "2", "3", "4", "5"]
+    var names = []
+    if (!root.monitor) return names
+
     var values = Hyprland.workspaces.values
 
     for (var i = 0; i < values.length; i++) {
-      var name = values[i].name
+      var workspace = values[i]
+      if (!workspace.monitor || workspace.monitor.name !== root.monitor.name) continue
+
+      var name = workspace.name
       if (/^\d+[a-z]*$/.test(name) && names.indexOf(name) === -1) names.push(name)
     }
 
@@ -106,6 +111,7 @@ BarWidget {
   implicitHeight: content.implicitHeight
 
   Component.onCompleted: syncWorkspaceModel()
+  onMonitorChanged: syncWorkspaceModel()
 
   FileView {
     path: root.descriptionsPath
@@ -119,6 +125,15 @@ BarWidget {
   Connections {
     target: Hyprland.workspaces
     function onValuesChanged() { root.syncWorkspaceModel() }
+  }
+
+  Instantiator {
+    model: Hyprland.workspaces
+    delegate: Connections {
+      required property var modelData
+      target: modelData
+      function onMonitorChanged() { root.syncWorkspaceModel() }
+    }
   }
 
   Connections {

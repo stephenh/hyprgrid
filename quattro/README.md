@@ -6,7 +6,7 @@ workspaces such as `2a` and `3b` negative IDs, so the stock widget omits hyprgri
 
 `hyprgrid.workspaces` replaces that widget and:
 
-- displays live numbered and hyprgrid workspaces, including `2a`, `2b`, and `3b`;
+- displays the live numbered and hyprgrid workspaces assigned to each bar's monitor, including `2a`, `2b`, and `3b`;
 - sorts them by column and task (`2`, `2a`, `2b`, `3`);
 - keeps the active workspace name visible and uses the bar's active color;
 - shows each monitor's active workspace or task description;
@@ -15,8 +15,7 @@ workspaces such as `2a` and `3b` negative IDs, so the stock widget omits hyprgri
 - focuses named workspaces correctly when clicked;
 - updates when Hyprland creates, removes, or renames a workspace.
 
-Like Waybar, it only shows named workspaces that currently exist. The numbered `1..5` buttons remain
-visible as Omarchy's stock widget does.
+Like Waybar, each bar only shows workspaces that currently exist on its monitor.
 
 ## Install
 

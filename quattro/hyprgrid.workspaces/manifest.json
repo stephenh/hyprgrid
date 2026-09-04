@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "hyprgrid.workspaces",
   "name": "Hyprgrid Workspaces",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "author": "hyprgrid",
   "description": "Grid workspaces with descriptions and urgent state",
   "kinds": [
