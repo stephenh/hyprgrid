@@ -24,6 +24,10 @@ local reconciling = false
 local healing = false
 local relocating = false
 
+-- Explicit column moves outrank majority/home healing until the output layout changes. Native workspace
+-- reassignment can arrive after relocating clears; a two-workspace tie must not undo the user's move.
+local column_destinations = {}
+
 -- The tag row last visited (>=2), remembered so Super+N can return to it even after a home-workspace
 -- detour; nil until a grid workspace is focused. Home visits deliberately do not clear it.
 local current_row = nil
@@ -112,6 +116,7 @@ end
 -- itself after a resume reshuffles outputs -- rejoins the pack instead of the pack chasing it. (A split
 -- otherwise makes the lock-step focus a tag on another screen, bouncing focus off the monitor you're on
 -- and dropping waybar's active underline.) No-op when nothing is split; focus is left where it was.
+-- An explicit column destination takes precedence while that monitor remains connected.
 local function heal_split_columns()
   if healing or relocating then return end
   healing = true
@@ -127,13 +132,16 @@ local function heal_split_columns()
     end
   end
   -- Anchor each column to its majority monitor (home's monitor wins ties).
+  local connected = {}
+  for _, mon in ipairs(hl.get_monitors()) do connected[mon.name] = true end
   local anchor = {}
   for col, per_mon in pairs(counts) do
     local best, best_n
     for m, n in pairs(per_mon) do
       if not best or n > best_n or (n == best_n and m == home_mon[col]) then best, best_n = m, n end
     end
-    anchor[col] = best
+    local destination = column_destinations[col]
+    anchor[col] = destination and connected[destination] and destination or best
   end
   for _, ws in ipairs(hl.get_workspaces()) do
     local col = cell_of(ws.name)
@@ -153,6 +161,12 @@ local function schedule_heal()
   if heal_scheduled then return end
   heal_scheduled = true
   hl.timer(function() heal_scheduled = false; heal_split_columns() end, { timeout = 800, type = "oneshot" })
+end
+
+-- Forget explicit destinations when outputs change so resume/hotplug can choose a new majority monitor.
+local function schedule_layout_heal()
+  column_destinations = {}
+  schedule_heal()
 end
 
 -- Move the focused monitor -- plus every other monitor whose home column already has grid workspaces
@@ -328,6 +342,7 @@ local function move_column_to_monitor(dir)
   if not col then return end
   local target = adjacent_monitor(dir)
   if not target then return end
+  column_destinations[col] = target
   -- Move the inactive tags first, then the focused workspace LAST. Moving the focused workspace carries
   -- focus with it and surfaces it on the destination, so no manual refocus is needed -- an extra focus
   -- dispatch only bounces us back off the destination, leaving the column hidden behind its old window.
@@ -445,9 +460,9 @@ end)
 -- stray move, a numbered-workspace reassignment) or the output layout changing (sleep/resume, hotplug,
 -- which is what drifts a home workspace away from its tags).
 hl.on("workspace.move_to_monitor", schedule_heal)
-hl.on("monitor.added", schedule_heal)
-hl.on("monitor.removed", schedule_heal)
-hl.on("monitor.layout_changed", schedule_heal)
+hl.on("monitor.added", schedule_layout_heal)
+hl.on("monitor.removed", schedule_layout_heal)
+hl.on("monitor.layout_changed", schedule_layout_heal)
 -- On login/reboot, reset the runtime descriptions from the git-tracked defaults, and consolidate any
 -- columns that came up split.
 o.exec_on_start(os.getenv("HOME") .. "/.local/bin/hypr-ws-desc seed")

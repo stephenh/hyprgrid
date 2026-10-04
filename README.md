@@ -77,7 +77,9 @@ the top of the script — `MAX_ROWS = 9` gives tags `a..h` (8 tasks); bump it fo
 **2. Show grid workspaces in the bar.** Choose the integration for your system:
 
 - **Omarchy Quattro:** install the included `hyprgrid.workspaces` shell plugin so named workspaces such as
-  `2a`, `2b`, and `3b` appear alongside numbered workspaces. See **[quattro/README.md](quattro/README.md)**.
+  `2a`, `2b`, and `3b` appear alongside numbered workspaces. The installer also preserves **global workspace
+  numbering**, overriding Omarchy's per-monitor numbering introduced in the 2026-10-20 update.
+  See **[quattro/README.md](quattro/README.md)**.
 - **Waybar / pre-Quattro Omarchy:** install the `hypr-ws-desc` script, defaults file, and per-monitor Waybar
   config. See **[waybar/README.md](waybar/README.md)**.
 

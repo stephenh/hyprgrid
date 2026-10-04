@@ -25,6 +25,7 @@ tests/
   navigation.lua            row navigation stays within a column; all 8 tags reachable
   multimonitor.lua          move-column-across-monitors, split-healing
   compaction.lua            empty-row squeeze + description shift, incl. the duplicate-workspace regression
+  quattro.lua               global focus/move actions, silent moves, reload/hotplug without renumbering
 ```
 
 ## How the fake works

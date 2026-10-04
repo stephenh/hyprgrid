@@ -96,3 +96,58 @@ H.scenario("Super+Ctrl+Shift+K carries the window up a tag AND lock-steps every 
   H.expect_windows("1a", 1); H.expect_absent("1b")
   H.expect_focused("DP-1"); H.expect_no_duplicates()
 end)
+
+H.scenario("a delayed home reassignment cannot undo moving a two-workspace column left twice", function()
+  local Stub = require("stub.hyprland")
+  -- Given column 1 has its home and one tag on monitor 3.
+  H.boot()
+  Stub.seed_window("1a", "HDMI-A-1")
+  -- And the home has a window so both pieces survive the move.
+  H.open("1")
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:1", monitor = "HDMI-A-1" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1a" }))
+
+  -- When the whole column moves left twice, but the home is reassigned to the old monitor afterward.
+  H.press("SUPER + SHIFT + Y")
+  H.press("SUPER + SHIFT + Y")
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:1", monitor = "HDMI-A-1" }))
+  H.timers()
+
+  -- Then healing respects the explicit destination instead of pulling the tag back in the tie.
+  H.eq((H.workspaces())["1a"].mon, "DP-1", "1a stays on the requested destination")
+end)
+
+H.scenario("healing brings a drifted home to the explicitly moved tag", function()
+  local Stub = require("stub.hyprland")
+  -- Given a windowed home and tag share monitor 1.
+  H.boot()
+  H.open("1")
+  Stub.seed_window("1a", "DP-1")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1a" }))
+
+  -- When the column moves right but the home drifts back before healing.
+  H.press("SUPER + SHIFT + O")
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:1", monitor = "DP-1" }))
+  H.timers()
+
+  -- Then the home rejoins the tag at the requested destination.
+  H.eq((H.workspaces())["1"].mon, "DP-2", "home follows the explicit move")
+end)
+
+H.scenario("an output layout change clears the explicit column destination", function()
+  local Stub = require("stub.hyprland")
+  -- Given a column explicitly moved from monitor 1 to monitor 2.
+  H.boot()
+  H.open("1")
+  Stub.seed_window("1a", "DP-1")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1a" }))
+  H.press("SUPER + SHIFT + O")
+
+  -- When hotplug changes the layout and the home drifts to monitor 1.
+  H.add_mon("DP-3", 7680)
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:1", monitor = "DP-1" }))
+  H.timers()
+
+  -- Then the normal home tie-breaker applies again.
+  H.eq((H.workspaces())["1a"].mon, "DP-1", "layout change restores normal healing")
+end)
