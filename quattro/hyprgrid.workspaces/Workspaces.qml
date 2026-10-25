@@ -139,7 +139,16 @@ BarWidget {
   Connections {
     target: Hyprland
     function onRawEvent(event) {
-      if (event && event.name === "renameworkspace") root.syncWorkspaceModel()
+      var name = event ? String(event.name) : ""
+      if (name === "renameworkspace") root.syncWorkspaceModel()
+
+      // Quickshell can miss both monitors' active workspaces when a workspace
+      // moves. Query Hyprland instead of waiting for mouse-driven focus changes.
+      var switched = name === "workspacev2" && root.monitor !== null && root.monitor.focused
+      if (switched || name === "moveworkspacev2" || name === "changeworkspaceid") {
+        Hyprland.refreshMonitors()
+        Hyprland.refreshWorkspaces()
+      }
     }
   }
 

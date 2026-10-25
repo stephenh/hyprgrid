@@ -3,6 +3,9 @@
 This repo is a Hyprland 2D-workspace-grid (`workspace-grid.lua`) plus a Lua test harness for it. Read
 [README.md](README.md) for what the grid is for, and [TESTING.md](TESTING.md) for how the harness works.
 
+For bar plugin changes, also follow [AGENTS.md](AGENTS.md): restart the shell after deploying QML;
+the hot-reload log can report success while the shell still runs cached code.
+
 ## Golden rule: never debug the grid on the live session
 
 Editing `~/.config/hypr/workspace-grid.lua` and driving `hyprctl` to test it has repeatedly destroyed the

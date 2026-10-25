@@ -11,6 +11,7 @@ workspaces. See the "golden rule" in [CLAUDE.md](CLAUDE.md).)
 cd ~/other/hyprgrid
 lua run.lua                        # all tests/*.lua   (lua 5.4/5.5 or luajit)
 lua run.lua tests/navigation.lua   # one file
+node --test tests/workspaces.test.js # bar IPC event regression tests
 ```
 
 ## Layout
