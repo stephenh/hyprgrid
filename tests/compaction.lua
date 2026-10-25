@@ -46,7 +46,7 @@ H.scenario("compacting the tag you're VIEWING must not create a duplicate (the 2
   H.eq(H.desc("a"), "beta", "description shifted up with the content")
 end)
 
-H.scenario("closing viewed 2c with 2a through 2d open defers compaction and follows renamed 2d", function()
+H.scenario("closing viewed 2c with 2a through 2d open defers compaction and returns to 2b", function()
   H.boot()
   H.press(super_n(2))
   fill_tags({ "alpha", "beta", "gamma", "delta" })
@@ -58,10 +58,40 @@ H.scenario("closing viewed 2c with 2a through 2d open defers compaction and foll
   H.expect_exists("2d")                       -- no workspace rename from inside CWindow::~CWindow
   H.timers()
 
-  H.expect_active("DP-2", "2c")
+  H.expect_active("DP-2", "2b")
   H.expect_windows("2a", 1); H.expect_windows("2b", 1); H.expect_windows("2c", 1)
   H.expect_absent("2d")
   H.expect_no_duplicates()
+end)
+
+H.scenario("closing middle 2b returns to 2a even after fallback to column 3", function()
+  -- Given three occupied tags in column 2
+  H.boot()
+  H.press(super_n(2))
+  fill_tags({ "alpha", "beta", "gamma" })
+  H.press("SUPER + CTRL + K")
+
+  -- When the last window closes and focus has fallen back to a different column before reconciliation
+  H.close_all_on("2b")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "3" }))
+  H.timers()
+
+  -- Then return to the preceding workspace in the closing column
+  H.expect_active("DP-2", "2a")
+end)
+
+H.scenario("closing the final tag returns to the preceding tag without compaction", function()
+  -- Given two occupied tags in column 2
+  H.boot()
+  H.press(super_n(2))
+  fill_tags({ "alpha", "beta" })
+
+  -- When the last window in 2b closes
+  H.close_all_on("2b")
+  H.timers()
+
+  -- Then return to 2a even though the remaining rows already have contiguous names
+  H.expect_active("DP-2", "2a")
 end)
 
 H.scenario("a tag is NOT compacted while another column still holds a window in it", function()
@@ -104,4 +134,35 @@ H.scenario("multi-column: an all-empty tag row renumbers every column together (
   H.eq(H.desc("a"), "beta", "shared description a follows b across all columns")
   H.eq(H.desc("b"), "gamma", "shared description b follows c")
   H.expect_no_duplicates()
+end)
+
+H.scenario("closing one of two windows keeps the viewed tag active", function()
+  -- Given two windows on the active 2b workspace
+  H.boot()
+  H.press(super_n(2))
+  fill_tags({ "alpha", "beta" })
+  local extra = H.open()
+
+  -- When only one window closes
+  H.close(extra)
+  H.timers()
+
+  -- Then the surviving window remains visible
+  H.expect_active("DP-2", "2b")
+end)
+
+H.scenario("closing a background column on the same row does not steal focus", function()
+  -- Given 2a is focused and 1a is occupied on another monitor
+  local Stub = require("stub.hyprland")
+  H.boot()
+  Stub.seed_window("1a", "DP-1")
+  H.press(super_n(2))
+  fill_tags({ "alpha" })
+
+  -- When the background workspace loses its last window
+  H.close_all_on("1a")
+  H.timers()
+
+  -- Then column 2 remains focused
+  H.expect_focused("DP-2")
 end)

@@ -32,9 +32,9 @@ local column_destinations = {}
 -- detour; nil until a grid workspace is focused. Home visits deliberately do not clear it.
 local current_row = nil
 
--- Active grid row recorded at window.close, keyed by address until window.destroy. Hyprland falls back to
--- the home workspace between those events when the closing window was the workspace's last one.
-local closing_rows = {}
+-- Capture the full active cell before closing its last window can change focus. Remembering only the
+-- row lets a fallback to another home column restore a nonexistent workspace in that column.
+local closing_cells = {}
 
 -- Parse a workspace name into (home column, row). Row 1 is the home workspace; rows 2+ are grid
 -- workspaces (row 2 = tag "a"). I.e. "2b" -> ("2", 3), "2" -> ("2", 1); nil if neither home nor grid.
@@ -174,9 +174,9 @@ end
 -- whose column has no grid workspaces (e.g. "8" with no 8*) is left alone, so it isn't dragged into
 -- the grid; the focused monitor still moves so you can create the first tag of a fresh column.
 -- Guarded by `syncing` so the empty workspaces we move off of don't trigger a compaction mid-sync.
-local function set_all_to_row(R)
+local function set_all_to_row(R, origin_col)
   local origin = focused_monitor()
-  local origin_col = current_cell()
+  origin_col = origin_col or current_cell()
   local cols = grid_columns()
   syncing = true
   -- Lock-step the OTHER monitors first. A split column's home workspace lives on a different monitor, so
@@ -207,10 +207,11 @@ end
 -- Renaming a windowed workspace carries its windows, but renaming onto a name that is still on screen makes
 -- a DUPLICATE (the "two 2a" bug). So we first PARK every monitor on its home column -- now no grid cell is
 -- visible, the empty ones dispose, and the renames below have free targets -- then bring the monitors back
--- onto the (now compacted) tag they were on. `closed_row` preserves the viewed row across Hyprland's
--- automatic home fallback after closing the last window. Event handlers schedule this after Hyprland's
+-- onto the (now compacted) tag they were on. `closed_cell` preserves the closing column and monitor across
+-- Hyprland's automatic fallback; an emptied active cell returns to its preceding occupied tag, or home.
+-- Event handlers schedule this after Hyprland's
 -- window lifecycle callback returns; workspace mutation from inside CWindow::~CWindow corrupts Hyprland.
-local function reconcile_tags(closed_row)
+local function reconcile_tags(closed_cell)
   if reconciling then return end
   reconciling = true
 
@@ -225,11 +226,33 @@ local function reconcile_tags(closed_row)
   table.sort(orows)
   local newrow, top, changed = {}, 1, false
   for i, r in ipairs(orows) do newrow[r] = i + 1; top = i + 1; if newrow[r] ~= r then changed = true end end
-  if not changed then reconciling = false; return end -- already contiguous from tag a; nothing to squeeze
-
   local origin = focused_monitor()
-  local _, frow = current_cell()
-  if frow == 1 and closed_row then frow = closed_row end
+  local origin_col, frow = current_cell()
+  local return_row
+  if closed_cell then
+    local empty, previous = true, 1
+    for _, ws in ipairs(hl.get_workspaces()) do
+      local col, row = cell_of(ws.name)
+      if col == closed_cell.col and (ws.windows or 0) > 0 then
+        if row == closed_cell.row then empty = false end
+        if row < closed_cell.row then previous = math.max(previous, row) end
+      end
+    end
+    if empty then
+      origin, origin_col = closed_cell.monitor, closed_cell.col
+      return_row = newrow[previous] or 1
+    end
+  end
+
+  -- Closing the highest tag needs focus restoration even when there is no gap to compact.
+  if not changed then
+    if return_row and origin then
+      hl.dispatch(hl.dsp.focus({ monitor = origin }))
+      set_all_to_row(return_row, origin_col)
+    end
+    reconciling = false
+    return
+  end
 
   -- park every monitor on its home column so no grid cell stays visible during the renames
   syncing = true
@@ -259,10 +282,11 @@ local function reconcile_tags(closed_row)
 
   if #remap > 0 then hl.exec_cmd("hypr-ws-desc remap " .. table.concat(remap, " ")) end
 
-  -- bring the focused monitor (and its lock-step peers) back onto the tag it was on, now compacted
+  -- Restore the saved column, not whichever home column Hyprland chose during fallback or parking.
+  -- A surviving viewed tag follows its rename; an emptied one returns to the preceding occupied tag.
   if origin then
     hl.dispatch(hl.dsp.focus({ monitor = origin }))
-    set_all_to_row(frow and (newrow[frow] or math.min(frow, top)) or 1)
+    set_all_to_row(return_row or (frow and (newrow[frow] or math.min(frow, top)) or 1), origin_col)
   end
   -- A compaction can leave a column split across monitors -- its renames/refocus never move a workspace
   -- between monitors, so a column whose home had already drifted stays split -- and nothing else heals on a
@@ -275,18 +299,18 @@ end
 
 -- Coalesce window lifecycle events and reconcile only after their native callbacks have returned. In
 -- particular, `window.destroy` is emitted from CWindow::~CWindow, where re-entering workspace focus/rename
--- can corrupt Hyprland's heap. Keep the latest viewed row so a burst of closes still restores focus.
+-- can corrupt Hyprland's heap. Keep the latest viewed cell so a burst of closes still restores focus.
 local reconcile_scheduled = false
-local reconcile_closed_row = nil
-local function schedule_reconcile(closed_row)
-  if closed_row then reconcile_closed_row = closed_row end
+local reconcile_closed_cell = nil
+local function schedule_reconcile(closed_cell)
+  if closed_cell then reconcile_closed_cell = closed_cell end
   if reconcile_scheduled then return end
   reconcile_scheduled = true
   hl.timer(function()
     reconcile_scheduled = false
-    local row = reconcile_closed_row
-    reconcile_closed_row = nil
-    if syncing then schedule_reconcile(row) else reconcile_tags(row) end
+    local cell = reconcile_closed_cell
+    reconcile_closed_cell = nil
+    if syncing then schedule_reconcile(cell) else reconcile_tags(cell) end
   end, { timeout = 50, type = "oneshot" })
 end
 
@@ -446,15 +470,17 @@ end)
 -- column. Defer until the window callback returns, and skip mid-sync so lock-step isn't pulled off its row.
 hl.on("window.open", function() if not syncing then schedule_reconcile() end end)
 hl.on("window.close", function(window)
-  local _, row = cell_of(window and window.workspace and window.workspace.name)
-  local _, active_row = current_cell()
-  if row and row >= 2 and row == active_row and window.address then closing_rows[window.address] = row end
+  local col, row = cell_of(window and window.workspace and window.workspace.name)
+  local active_col, active_row = current_cell()
+  if row and row >= 2 and col == active_col and row == active_row and window.address then
+    closing_cells[window.address] = { col = col, row = row, monitor = focused_monitor() }
+  end
 end)
 hl.on("window.destroy", function(window)
   local address = window and window.address
-  local closed_row = address and closing_rows[address] or nil
-  if address then closing_rows[address] = nil end
-  if not syncing then schedule_reconcile(closed_row) end
+  local closed_cell = address and closing_cells[address] or nil
+  if address then closing_cells[address] = nil end
+  if not syncing then schedule_reconcile(closed_cell) end
 end)
 -- Re-consolidate columns shortly after anything that can split them: a workspace changing monitors (a
 -- stray move, a numbered-workspace reassignment) or the output layout changing (sleep/resume, hotplug,
