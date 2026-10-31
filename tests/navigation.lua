@@ -38,14 +38,49 @@ H.scenario("navigating column 1 never disturbs the column shown on DP-1's neighb
   H.expect_no_duplicates()
 end)
 
-H.scenario("MAX_ROWS=9: can descend through all 8 tags a..h, and clamps at h", function()
+H.scenario("MAX_ROWS=13: can descend through all 12 tags a..l, and clamps at l", function()
   H.boot()
   H.press("SUPER + code:10")            -- Super+1: focus column 1
-  local reached = { "a", "b", "c", "d", "e", "f", "g", "h" }
-  for i = 1, 8 do
+  local reached = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l" }
+  for i = 1, 12 do
     H.press("SUPER + CTRL + J")
     H.expect_active("DP-1", "1" .. reached[i])
   end
-  H.press("SUPER + CTRL + J")           -- past h -> clamps, stays on h
-  H.expect_active("DP-1", "1h")
+  H.press("SUPER + CTRL + J")           -- past l -> clamps, stays on l
+  H.expect_active("DP-1", "1l")
+end)
+
+H.scenario("managed task without windows keeps its row during compaction", function()
+  -- Given an empty managed task before a windowed task.
+  H.boot()
+  hyprgrid.reserve("task-one")
+  H.open("2b")
+  -- When pending compaction runs.
+  H.timers()
+  -- Then the later task retains its row.
+  H.expect_windows("2b", 1)
+end)
+
+H.scenario("managed identity follows compaction after an earlier task is released", function()
+  -- Given two managed tasks and a window in the second.
+  H.boot()
+  hyprgrid.reserve("task-one")
+  hyprgrid.reserve("task-two")
+  H.open("2b")
+  -- When the first task is released.
+  hyprgrid.release("task-one")
+  H.timers()
+  -- Then the second task has the first row under its original identity.
+  H.eq(hyprgrid.rows["task-two"], 2)
+end)
+
+H.scenario("managed task release refuses a row with surviving windows", function()
+  -- Given a managed task with an unsaved editor still open.
+  H.boot()
+  hyprgrid.reserve("task-one")
+  H.open("1a")
+  -- When release is attempted.
+  pcall(hyprgrid.release, "task-one")
+  -- Then its reservation remains.
+  H.eq(hyprgrid.rows["task-one"], 2)
 end)

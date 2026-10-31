@@ -12,6 +12,7 @@ cd ~/other/hyprgrid
 lua run.lua                        # all tests/*.lua   (lua 5.4/5.5 or luajit)
 lua run.lua tests/navigation.lua   # one file
 node --test tests/workspaces.test.js # bar IPC event regression tests
+python -m unittest discover -s tests -p 'test_*.py' # task lifecycle with real temporary jj repositories
 ```
 
 ## Layout
@@ -23,7 +24,9 @@ harness.lua                 test framework + helpers (boot the grid, press keys,
 run.lua                     runner
 tests/
   hyprland_behaviors.lua    the learned Hyprland behaviors, as tests (guards the stub's fidelity)
-  navigation.lua            row navigation stays within a column; all 8 tags reachable
+  navigation.lua            row navigation, all 12 tags, managed task reservations
+  task_bindings.lua         one-shot task submap and direct letter selection
+  test_tasks.py             jj checkout lifecycle, hooks, archive/restore, identity
   multimonitor.lua          move-column-across-monitors, split-healing
   compaction.lua            empty-row squeeze + description shift, incl. the duplicate-workspace regression
   quattro.lua               global focus/move actions, silent moves, reload/hotplug without renumbering

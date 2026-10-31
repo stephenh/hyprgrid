@@ -1,0 +1,11 @@
+[Unit]
+Description=Hyprgrid OpenCode task activity
+
+[Service]
+ExecStart=%h/.local/bin/hyprgrid-task watch
+Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

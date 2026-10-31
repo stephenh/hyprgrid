@@ -71,8 +71,8 @@ cp workspace-grid.lua ~/.config/hypr/
 require("hypr.workspace-grid")
 ```
 
-`hyprctl reload`, and the [keybinds](#keybinds) below are live. The number of tasks is the single knob at
-the top of the script — `MAX_ROWS = 9` gives tags `a..h` (8 tasks); bump it for more.
+`hyprctl reload`, and the [keybinds](#keybinds) below are live. `MAX_ROWS = 13` gives
+tags `a..l` (12 tasks), plus the home row.
 
 **2. Show grid workspaces in the bar.** Choose the integration for your system:
 
@@ -86,6 +86,11 @@ the top of the script — `MAX_ROWS = 9` gives tags `a..h` (8 tasks); bump it fo
 **3. Agent-done alerts (optional, Waybar).** Make a task's workspace **pulse in Waybar** when a Claude Code
 or opencode agent finishes in an unfocused window (terminal bell → Hyprland urgent). See
 **[notify/README.md](notify/README.md)**.
+
+**4. Managed task workspaces (optional).** The [task coordinator](tasks/README.md)
+adds jj workspace creation, OpenCode sessions, `Super+T` task menus, snooze,
+archive/restore, and SSH attachment. See [task-workspaces.md](task-workspaces.md)
+for the design. Existing unmanaged rows continue to work normally.
 
 ### Waybar description defaults
 
@@ -116,10 +121,11 @@ These defaults apply only when the [Waybar description integration](waybar/READM
 |---|---|
 | `Super+Ctrl+J` / `Super+Ctrl+K` | Next / previous **task** (all monitors, lock-step) |
 | `Super+Ctrl+1..9` | Jump to home / task `a..h` |
-| `Super+1..0` | Switch a monitor to column `1..10` (staying on the current task) |
+| `Super+1..0` | Switch to column `1..10` on the current task if that exact workspace exists; otherwise go to its home workspace |
 | `Super+Ctrl+Shift+J` / `…+K` | Move the focused window **down / up a task** — every monitor follows in lock-step, carrying the window |
 | `Super+Ctrl+L` / `Super+Ctrl+H` | Walk to the next / previous workspace in grid order |
 | `Super+Shift+O` / `Super+Shift+Y` | Move the whole column to the monitor on the right / left |
+| `Super+Shift+1..0` | Move the focused window to the same task row in that column, creating the cell and following it; from home, use the destination's visible or last-used workspace |
 | `Super+D` | Set the current task's Waybar description (when installed) |
 
 ## Developing & testing

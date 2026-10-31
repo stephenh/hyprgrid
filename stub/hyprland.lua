@@ -40,6 +40,8 @@ function Stub.reset(monitors)
     workspaces = {}, -- array of { name, id, monitor, windows, persistent }
     windows = {},    -- array of { addr, ws }
     binds = {},      -- normalized-keys -> callback
+    submap = "reset",
+    defining_submap = "reset",
     handlers = {},   -- event name -> array of callbacks
     desc = {},       -- description store, keyed by tag ("a") or home name ("2") -- like hypr-ws-desc's json
     timers = {},     -- pending { cb } from hl.timer
@@ -240,7 +242,7 @@ local function apply(desc)
       gc() -- an empty just-renamed (now non-persistent) workspace disposes here
     end
   elseif op == "win_move" then -- movetoworkspace(silent)
-    local win = desc.window and (function() for _, x in ipairs(S.windows) do if x.addr == desc.window then return x end end end)()
+    local win = desc.window and (function() for _, x in ipairs(S.windows) do if x.addr == desc.window:gsub("^address:", "") then return x end end end)()
       or (function() -- active window on focused monitor's active workspace
         local fm = focused_monitor()
         for _, x in ipairs(S.windows) do if x.ws == fm.active then return x end end
@@ -277,6 +279,7 @@ hl.dsp = {
     return { op = "focus", workspace = sel_name(a.workspace) }
   end,
   exec_cmd = function(cmd) return { op = "exec", cmd = cmd } end,
+  submap = function(name) return { op = "submap", name = name } end,
   workspace = {
     move = function(a) return { op = "ws_move", workspace = norm(a.workspace), monitor = a.monitor } end,
     rename = function(a) return { op = "ws_rename", workspace = sel_name(a.workspace), newname = sel_name(a.name) } end,
@@ -286,7 +289,10 @@ hl.dsp = {
   },
 }
 
-function hl.dispatch(desc) if desc and desc.op then apply(desc) end end
+function hl.dispatch(desc)
+  if desc and desc.op == "submap" then S.submap = desc.name
+  elseif desc and desc.op then apply(desc) end
+end
 
 function hl.get_workspaces()
   refresh_counts()
@@ -298,6 +304,15 @@ function hl.get_workspaces()
     }
   end
   return out
+end
+
+function hl.get_windows()
+  local windows = {}
+  for _, win in ipairs(S.windows) do
+    windows[#windows + 1] = { address = win.addr, class = win.class, initial_class = win.class,
+      workspace = { name = win.ws } }
+  end
+  return windows
 end
 
 function hl.get_monitors()
@@ -316,7 +331,17 @@ function hl.get_active_workspace()
   return m and { name = m.active } or nil
 end
 
-function hl.bind(keys, cb, _opts) S.binds[keys:gsub("%s+", "")] = cb end
+function hl.bind(keys, cb, _opts)
+  local prefix = S.defining_submap == "reset" and "" or S.defining_submap .. ":"
+  S.binds[prefix .. keys:gsub("%s+", "")] = cb
+end
+-- Models the documented Lua submap registration scope, not compositor input timing.
+function hl.define_submap(name, fn)
+  local previous = S.defining_submap
+  S.defining_submap = name
+  fn()
+  S.defining_submap = previous
+end
 function hl.unbind(keys) S.binds[keys:gsub("%s+", "")] = nil end
 function hl.on(event, cb) S.handlers[event] = S.handlers[event] or {}; table.insert(S.handlers[event], cb) end
 function hl.exec_cmd(cmd) stub_exec(cmd) end
@@ -361,7 +386,8 @@ Stub.seed_window = function(ws, monitor, id)
   return addr
 end
 Stub.press = function(keys)
-  local cb = S.binds[keys:gsub("%s+", "")]
+  local prefix = S.submap == "reset" and "" or S.submap .. ":"
+  local cb = S.binds[prefix .. keys:gsub("%s+", "")] or S.binds[prefix .. "catchall"]
   if not cb then error("no keybind registered for '" .. keys .. "'") end
   cb()
 end
@@ -369,14 +395,14 @@ Stub.run_timers = function()
   local t = S.timers; S.timers = {}
   for _, cb in ipairs(t) do cb() end
 end
-Stub.open_window = function(ws)
+Stub.open_window = function(ws, class)
   ws = ws or (focused_monitor() and focused_monitor().active)
   if not Stub._find(ws) then Stub._create(ws, focused_monitor().name) end -- a window creates its workspace
   S.next_addr = S.next_addr + 1
   local addr = string.format("0x%x", S.next_addr)
-  S.windows[#S.windows + 1] = { addr = addr, ws = ws }
+  S.windows[#S.windows + 1] = { addr = addr, ws = ws, class = class }
   refresh_counts()
-  fire("window.open", { address = addr, workspace = { name = ws } })
+  fire("window.open", { address = addr, class = class, initial_class = class, workspace = { name = ws } })
   return addr
 end
 Stub.close_window = function(addr)

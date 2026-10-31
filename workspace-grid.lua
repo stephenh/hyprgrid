@@ -12,7 +12,11 @@
 -- home workspace's own label (1=ide, 2=terminal, 3=personal); a monitor on a grid workspace shows
 -- the tag's shared label (every *a alike, e.g. "bug-one"; every *b alike, e.g. "bug-two").
 
-local MAX_ROWS = 9 -- row 1 is the home workspace; rows 2..9 are tags a..h (8 tags). Bump for more tags.
+local MAX_ROWS = 13 -- row 1 is home; rows 2..13 are tasks a..l.
+
+-- The optional task integration persists these reservations. The compositor is the only writer of
+-- row assignments, so a menu's slow setup command cannot race a workspace compaction.
+hyprgrid = { rows = {}, columns = {}, on_rows_changed = function() end }
 
 -- True while set_all_to_row / reconcile_tags is driving monitors, so nested focus churn doesn't recurse.
 local syncing = false
@@ -31,6 +35,9 @@ local column_destinations = {}
 -- The tag row last visited (>=2), remembered so Super+N can return to it even after a home-workspace
 -- detour; nil until a grid workspace is focused. Home visits deliberately do not clear it.
 local current_row = nil
+
+-- Window sends remember each destination column, including explicit home visits.
+local column_rows = {}
 
 -- Capture the full active cell before closing its last window can change focus. Remembering only the
 -- row lets a fallback to another home column restore a nonexistent workspace in that column.
@@ -104,6 +111,10 @@ local function tag_of(row) return string.char(string.byte("a") + row - 2) end
 -- Home columns that currently have at least one grid workspace. I.e. -> { ["2"] = true } when 2a exists.
 local function grid_columns()
   local cols = {}
+  -- Managed tasks have tool columns even before their first IDE/browser window opens.
+  if next(hyprgrid.rows) then
+    for col in pairs(hyprgrid.columns) do cols[col] = true end
+  end
   for _, ws in ipairs(hl.get_workspaces()) do
     local col = (ws.name or ""):match("^(%d+)%a+$")
     if col then cols[col] = true end
@@ -215,8 +226,9 @@ local function reconcile_tags(closed_cell)
   if reconciling then return end
   reconciling = true
 
-  -- occupied rows and their packed (contiguous) targets
+  -- The standalone grid packs rows; task mode preserves letters and reuses holes on reserve.
   local occ = {}
+  for _, row in pairs(hyprgrid.rows) do occ[row] = true end
   for _, ws in ipairs(hl.get_workspaces()) do
     local col, row = cell_of(ws.name)
     if col and row and row >= 2 and (ws.windows or 0) > 0 then occ[row] = true end
@@ -225,7 +237,11 @@ local function reconcile_tags(closed_cell)
   for r in pairs(occ) do orows[#orows + 1] = r end
   table.sort(orows)
   local newrow, top, changed = {}, 1, false
-  for i, r in ipairs(orows) do newrow[r] = i + 1; top = i + 1; if newrow[r] ~= r then changed = true end end
+  for i, r in ipairs(orows) do
+    newrow[r] = hyprgrid.stable_rows and r or i + 1
+    top = newrow[r]
+    if newrow[r] ~= r then changed = true end
+  end
   local origin = focused_monitor()
   local origin_col, frow = current_cell()
   local return_row
@@ -280,6 +296,9 @@ local function reconcile_tags(closed_cell)
   end
   syncing = false
 
+  for id, row in pairs(hyprgrid.rows) do hyprgrid.rows[id] = newrow[row] end
+  for col, row in pairs(column_rows) do column_rows[col] = newrow[row] or 1 end
+  hyprgrid.on_rows_changed()
   if #remap > 0 then hl.exec_cmd("hypr-ws-desc remap " .. table.concat(remap, " ")) end
 
   -- Restore the saved column, not whichever home column Hyprland chose during fallback or parking.
@@ -345,17 +364,31 @@ local function jump_row(row)
   set_all_to_row(math.max(1, math.min(MAX_ROWS, row)))
 end
 
--- Switch the focused monitor to home column `col`, landing on the current tag when that column has
--- grid workspaces (else its home workspace). I.e. on tag "b", go_column("2") -> "2b" if 2* exists,
--- otherwise "2". If that workspace does not exist yet, first jump to the monitor already hosting this
--- column so the new tag is created there (keeping the whole column on one monitor) rather than here.
+-- Switching columns only visits existing task cells. Creating one requires moving a window or
+-- explicit row navigation. I.e. on tag "b", go_column("2") -> "2b" only if 2b exists, else "2".
+-- A missing home workspace still belongs on the monitor already hosting the column.
 local function go_column(col)
-  local row = (grid_columns()[col] and current_row) or 1
+  local row = current_row and workspace_exists(ws_name_for(col, current_row)) and current_row or 1
   if not workspace_exists(ws_name_for(col, row)) then
     local mon = column_monitor(col)
     if mon then hl.dispatch(hl.dsp.focus({ monitor = mon })) end
   end
   hl.dispatch(hl.dsp.focus({ workspace = selector_for(col, row) }))
+end
+
+-- A task window stays on its row, creating the destination cell if needed. From a home workspace,
+-- use the destination's visible/last-used cell, including an explicit last visit to home.
+local function send_to_column(col)
+  local row = column_rows[col] or 1
+  for _, mon in ipairs(hl.get_monitors()) do
+    local visible_col, visible_row = cell_of(mon.active_workspace and mon.active_workspace.name)
+    if visible_col == col then row = visible_row; break end
+  end
+  local _, source_row = current_cell()
+  if source_row and source_row >= 2 then row = source_row end
+  hl.dispatch(hl.dsp.window.move({ workspace = selector_for(col, row), follow = true }))
+  heal_split_columns()
+  schedule_reconcile()
 end
 
 -- Move the focused column -- home workspace plus every grid tag -- to the monitor left/right of it, so a
@@ -434,21 +467,24 @@ hl.unbind("SUPER + SHIFT + Y") -- was YouTube
 hl.unbind("SUPER + SHIFT + O") -- was Obsidian
 o.bind("SUPER + SHIFT + Y", "Move column to monitor on left", function() move_column_to_monitor("l") end)
 o.bind("SUPER + SHIFT + O", "Move column to monitor on right", function() move_column_to_monitor("r") end)
-for row = 1, MAX_ROWS do
+-- Numeric shortcuts remain on the number row, not minus/equal/backspace as MAX_ROWS grows.
+for row = 1, math.min(MAX_ROWS, 9) do
   local key = "SUPER + CTRL + code:" .. tostring(row + 9)
   hl.unbind(key) -- was Bar panel N
   hl.bind(key, function() jump_row(row) end,
     { description = "Jump to grid row " .. row .. " (all monitors)" })
 end
 
--- Re-point the Omarchy Super+1..0 workspace switches (SUPER+code:10..19) at the current tag: if the
--- target home column has grid workspaces, Super+N goes to that column's current-tag grid workspace
--- (e.g. "2b"); otherwise it still goes to the bare home workspace. Unbind first: Omarchy bound these.
+-- Re-point the Omarchy Super+1..0 workspace switches (SUPER+code:10..19) at the current tag when
+-- that exact cell exists (e.g. "2b"); otherwise go home. Unbind first: Omarchy bound these.
 for n = 1, 10 do
   local col = tostring(n) -- n=10 -> column "10" (Super+0)
   local key = "SUPER + code:" .. tostring(n + 9)
   hl.unbind(key)
   o.bind(key, "Switch to workspace " .. col .. " (current tag)", function() go_column(col) end)
+  local send_key = "SUPER + SHIFT + code:" .. tostring(n + 9)
+  hl.unbind(send_key) -- was a move to the bare numbered workspace
+  o.bind(send_key, "Move window to column " .. col .. " (task row or last workspace)", function() send_to_column(col) end)
 end
 
 -- Present Super+0's workspace (Hyprland's numbered workspace 10) as "0". Its id stays 10 so the numeric
@@ -462,8 +498,10 @@ o.bind("SUPER + D", "Set workspace description", os.getenv("HOME") .. "/.local/b
 -- Remember the current tag (for Super+N) and refresh the waybar description on any active-ws change.
 -- Only grid workspaces update the tag; landing on a home workspace keeps the previously active tag.
 hl.on("workspace.active", function(ws)
-  local _, row = cell_of(ws and ws.name)
+  local col, row = cell_of(ws and ws.name)
   if row and row >= 2 then current_row = row end
+  -- Compaction temporarily parks columns at home; that is not a user home visit.
+  if col and not reconciling and not healing then column_rows[col] = row end
   hl.exec_cmd("pkill -RTMIN+11 waybar")
 end)
 -- When a grid workspace is removed (e.g. its last window closed), close the tag gap it left in its
@@ -492,7 +530,80 @@ hl.on("monitor.layout_changed", schedule_layout_heal)
 -- On login/reboot, reset the runtime descriptions from the git-tracked defaults, and consolidate any
 -- columns that came up split.
 o.exec_on_start(os.getenv("HOME") .. "/.local/bin/hypr-ws-desc seed")
+for _, mon in ipairs(hl.get_monitors()) do
+  local col, row = cell_of(mon.active_workspace and mon.active_workspace.name)
+  if col then column_rows[col] = row end
+end
 heal_split_columns()
+
+-- Reserve a desktop slot before launching windows; headless tasks need no reservation.
+function hyprgrid.reserve(id)
+  assert(type(id) == "string" and id:match("^[a-z0-9-]+$"), "Invalid task ID")
+  if hyprgrid.rows[id] then return hyprgrid.rows[id] end
+  local occupied = {}
+  for _, row in pairs(hyprgrid.rows) do occupied[row] = true end
+  for _, ws in ipairs(hl.get_workspaces()) do
+    local _, row = cell_of(ws.name)
+    if row and (ws.windows or 0) > 0 then occupied[row] = true end
+  end
+  for row = 2, MAX_ROWS do
+    if not occupied[row] then
+      hyprgrid.rows[id] = row
+      hyprgrid.on_rows_changed()
+      return row
+    end
+  end
+  error("All 12 task rows are occupied")
+end
+
+-- Retain the reservation until every window has accepted its graceful close request.
+function hyprgrid.release(id)
+  local row = hyprgrid.rows[id]
+  if not row then return end
+  for _, ws in ipairs(hl.get_workspaces()) do
+    local _, candidate = cell_of(ws.name)
+    assert(candidate ~= row or (ws.windows or 0) == 0, "Task still has open windows")
+  end
+  hyprgrid.rows[id] = nil
+  hyprgrid.on_rows_changed()
+  schedule_reconcile()
+end
+
+-- External commands address stable IDs, while letter keys address the current row.
+function hyprgrid.jump(id, column)
+  local row = assert(hyprgrid.rows[id], "Task has no desktop row")
+  if column then
+    local mon = column_monitor(column)
+    if mon then hl.dispatch(hl.dsp.focus({ monitor = mon })) end
+    set_all_to_row(row, column)
+  else
+    set_all_to_row(row)
+  end
+end
+
+-- A delayed terminal may map after its empty target cell disappeared. Rejoin the terminal column
+-- using the same tested healing logic as other column moves, then compact the row it left.
+function hyprgrid.route_terminal(id, address)
+  local row = hyprgrid.rows[id]
+  if not row then return end
+  hl.dispatch(hl.dsp.window.move({ window = "address:" .. address,
+    workspace = selector_for("2", row), follow = false }))
+  heal_split_columns()
+  schedule_reconcile()
+end
+
+-- An unused letter never creates a workspace, unlike the existing numeric shortcuts.
+function hyprgrid.jump_letter(letter)
+  if letter == "0" then jump_row(1); return end
+  local row = letter:byte() - string.byte("a") + 2
+  for _, reserved in pairs(hyprgrid.rows) do
+    if reserved == row then jump_row(row); return end
+  end
+  for _, ws in ipairs(hl.get_workspaces()) do
+    local _, candidate = cell_of(ws.name)
+    if candidate == row and (ws.windows or 0) > 0 then jump_row(row); return end
+  end
+end
 
 -- OPTIONAL: give each home column a label and keep it always present. Uncomment to enable.
 -- With waybar's format set to "{name}", the bar then reads "ide term web work ... slack".
