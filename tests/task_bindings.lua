@@ -195,7 +195,7 @@ H.scenario("Zed opening on the wrong row returns to its launch workspace", funct
   hyprgrid.rows.abc123 = 4
   H.hl.dispatch(H.hl.dsp.focus({ monitor = "DP-2" }))
   H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2c" }))
-  hyprgrid.prepare_zed("abc123")
+  hyprgrid.prepare_zed("abc123", "biff-biff-abc123")
   H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2d" }))
   -- When the new Zed window maps with its task project title.
   H.open("2d", "dev.zed.Zed", "biff-biff-abc123")
@@ -211,7 +211,7 @@ H.scenario("routing Zed restores focus to its launch monitor", function()
   hyprgrid.rows.abc123 = 4
   H.hl.dispatch(H.hl.dsp.focus({ monitor = "DP-2" }))
   H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2c" }))
-  hyprgrid.prepare_zed("abc123")
+  hyprgrid.prepare_zed("abc123", "biff-biff-abc123")
   H.hl.dispatch(H.hl.dsp.focus({ monitor = "DP-1" }))
   H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1d" }))
   -- When the window-open handler completes.
@@ -236,4 +236,18 @@ H.scenario("auto-archive survives a destroyed window with an expired reference",
     if entry:find("archive%-empty") then requests[#requests + 1] = entry end
   end
   H.eq(table.concat(requests, "\n"), "exec:hyprgrid-task archive-empty abc123")
+end)
+
+H.scenario("Zed routes a clean repository title back to its launch workspace", function()
+  -- Given a task whose nested checkout is named biff.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  hyprgrid.rows.abc123 = 4
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2c" }))
+  hyprgrid.prepare_zed("abc123", "biff")
+  -- When Zed maps elsewhere with only the repository name in its title.
+  H.open("2d", "dev.zed.Zed", "biff")
+  H.timers()
+  -- Then it returns to the captured launch workspace.
+  H.expect_windows("2c", 1)
 end)

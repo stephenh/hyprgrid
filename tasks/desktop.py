@@ -80,7 +80,7 @@ class Desktop:
             raise TaskError("Task no longer has a desktop row")
         # Set both the launcher CWD and project path; --new prevents reusing another task's window.
         command = ["env", "--chdir=" + task["path"], "uwsm-app", "--", editor, "--new", task["path"]]
-        self.evaluate(f'hyprgrid.prepare_zed({lua_string(task["id"])}); '
+        self.evaluate(f'hyprgrid.prepare_zed({lua_string(task["id"])}, {lua_string(Path(task["path"]).name)}); '
                       f"hl.exec_cmd({lua_string(shlex.join(command))})")
 
     def clients(self, task):

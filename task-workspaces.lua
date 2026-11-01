@@ -41,10 +41,11 @@ return function(options)
 
   -- Capture the launch workspace before Zed can activate a different one.
   hyprgrid.zed_targets = {}
-  function hyprgrid.prepare_zed(id)
+  function hyprgrid.prepare_zed(id, project)
     local workspace = hl.get_active_workspace()
-    hyprgrid.zed_targets[id] = workspace.name:match("^%d+$") and tostring(workspace.id)
+    local target = workspace.name:match("^%d+$") and tostring(workspace.id)
       or "name:" .. workspace.name
+    table.insert(hyprgrid.zed_targets, { id = id, project = project, target = target })
   end
 
   -- Route by task identity rather than focus: applications can map after focus changes.
@@ -55,11 +56,16 @@ return function(options)
     local id = app_id:match("^org%.hyprgrid%.task([a-z0-9]+)$") or app_id:match("^hyprgrid%-([a-z0-9]+)$")
     local target, follow
     if app_id == "dev.zed.Zed" then
-      -- Task checkout basenames end in the stable ID, which Zed includes in its initial title.
-      id = (window.initial_title or window.title or ""):match("%-([a-z0-9]+)$")
-      target = id and hyprgrid.zed_targets[id]
+      -- Nested checkouts have a clean repo basename, so match the pending launch's project title.
+      local title = window.initial_title or window.title or ""
+      for index, launch in ipairs(hyprgrid.zed_targets) do
+        if launch.project == title then
+          id, target = launch.id, launch.target
+          table.remove(hyprgrid.zed_targets, index)
+          break
+        end
+      end
       if not target then return end
-      hyprgrid.zed_targets[id] = nil
       follow = true
     end
     local address = window.address

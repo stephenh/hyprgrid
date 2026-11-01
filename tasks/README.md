@@ -87,6 +87,10 @@ column 3 of that task's row; elsewhere it launches from the current workspace. T
 same action is available as **New browser window** under `Super+T → Space`. This
 bypasses Chromium's profile chooser, which can focus an existing window instead.
 
+New task checkouts live at `~/workspaces/<repo>-<task>-<id>/<repo>/`, so terminal
+prompts and editor project titles show just the repository name. The parent keeps
+duplicate task names distinct. Existing tasks retain their recorded checkout paths.
+
 `Super+T → Space → Zed` opens a new Zed window on the current workspace, with
 the task checkout as its working directory and project. It uses `zeditor` on Arch,
 or `zed` if that is the installed command.

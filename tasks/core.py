@@ -210,7 +210,7 @@ class Manager:
         if sum(path.name == repo.name for path in self.settings.repositories()) > 1:
             repo_label = f"{repo.parent.name}-{repo.name}"
         self.settings.workspaces.mkdir(parents=True, exist_ok=True)
-        path = self.settings.workspaces / f"{slug(repo_label)}-{slug(name)}-{task_id}"
+        path = self.settings.workspaces / f"{slug(repo_label)}-{slug(name)}-{task_id}" / repo.name
         task = {"id": task_id, "name": name, "repo": str(repo), "path": str(path),
                 "workspace": f"hyprgrid-{task_id}", "base": base, "session": None,
                 "state": "preparing", "activity": "unknown", "snoozed_until": 0,
@@ -219,6 +219,7 @@ class Manager:
         try:
             if desktop:
                 self.desktop.reserve(task)
+            path.parent.mkdir(parents=True, exist_ok=True)
             run(["jj", "workspace", "add", "--name", task["workspace"], "-r", base, str(path)], cwd=repo)
             task["checkout_created"] = True
             self.store.save(task)
@@ -245,6 +246,7 @@ class Manager:
             if not Path(task["path"]).exists():
                 if task.get("checkout_created"):
                     raise TaskError("Task checkout is missing; recover it before restoring this task")
+                Path(task["path"]).parent.mkdir(parents=True, exist_ok=True)
                 run(["jj", "workspace", "add", "--name", task["workspace"], "-r", task["base"], task["path"]], cwd=task["repo"])
                 task["checkout_created"] = True
                 self.store.save(task)
@@ -289,7 +291,8 @@ class Manager:
     def delete(self, task):
         """Remove only a verified dedicated workspace; retain the agent's conversation."""
         path = Path(task["path"])
-        if path.is_symlink() or not path.name.endswith("-" + task["id"]):
+        nested = path.name == Path(task["repo"]).name and path.parent.name.endswith("-" + task["id"])
+        if path.is_symlink() or (nested and path.parent.is_symlink()) or not (nested or path.name.endswith("-" + task["id"])):
             raise TaskError("Task checkout path no longer identifies its dedicated workspace")
         if path.exists() and repo_identity(path) != repo_identity(Path(task["repo"])):
             raise TaskError("Task checkout belongs to a different repository")
@@ -305,6 +308,9 @@ class Manager:
             self.store.save(task)
             if path.exists():
                 shutil.rmtree(path)
+            # Only remove an empty container; files placed beside the checkout belong to the user.
+            if nested and path.parent.exists() and not any(path.parent.iterdir()):
+                path.parent.rmdir()
             self.store.remove(task["id"])
         except Exception as error:
             self.fail(task, "delete", error)

@@ -332,5 +332,23 @@ class TaskWorkspacesTest(unittest.TestCase):
         self.assertEqual(rows["Personal\tProfile 1"], "Profile 1")
 
 
+    def test_checkout_has_a_clean_repo_basename(self):
+        # Given a repository and a task name.
+        task = self.manager.create(self.repo, "Invoice rounding")
+        # When resolving the task checkout.
+        path = Path(task["path"])
+        # Then its basename is only the repository name.
+        self.assertEqual(path.name, self.repo.name)
+
+    def test_delete_removes_empty_task_container(self):
+        # Given a task checkout nested in its dedicated container.
+        task = self.manager.create(self.repo, "Invoice rounding")
+        container = Path(task["path"]).parent
+        # When deleting the task.
+        self.manager.delete(task)
+        # Then its empty container is also removed.
+        self.assertFalse(container.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
