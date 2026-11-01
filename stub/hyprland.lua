@@ -349,7 +349,10 @@ end
 function hl.unbind(keys) S.binds[keys:gsub("%s+", "")] = nil end
 function hl.on(event, cb) S.handlers[event] = S.handlers[event] or {}; table.insert(S.handlers[event], cb) end
 function hl.exec_cmd(cmd) stub_exec(cmd) end
-function hl.timer(cb, _opts) S.timers[#S.timers + 1] = cb end
+function hl.timer(cb, opts)
+  assert(opts and opts.timeout and opts.timeout > 0, "opts.timeout must be > 0")
+  S.timers[#S.timers + 1] = cb
+end
 function hl.monitor(_spec) end -- test sets up monitors via Stub.reset; ignore config-time monitor rules
 
 -- workspace_rule: persistence. persistent=true creates-if-missing (on `monitor` or focused); =false disposes

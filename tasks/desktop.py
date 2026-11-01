@@ -42,15 +42,15 @@ class Desktop:
         """Launch a tagged native terminal; the Lua adapter routes its eventual window."""
         self.reserve(task)
         self.jump(task, terminal=True)
-        command = ["xdg-terminal-exec", f'--app-id=hyprgrid-{task["id"]}',
-                   f'--dir={task["path"]}', "--", self.executable,
-                   "shell" if shell else "attach", task["id"]]
-        command.append("--active-only")
+        app_id = task_app_id(task["id"])
+        command = ["xdg-terminal-exec", f'--app-id={app_id}',
+                   f'--dir={task["path"]}', "--"]
+        command += task_terminal_command(self.executable, task["id"], shell)
         # Hyprland launches with the desktop environment even when invoked by another client.
         self.evaluate(f"hl.exec_cmd({lua_string(shlex.join(command))})")
         deadline = time.monotonic() + 10
-        while not any(client.get("initialClass") == f'hyprgrid-{task["id"]}'
-                      or client.get("class") == f'hyprgrid-{task["id"]}'
+        while not any(client.get("initialClass") == app_id
+                      or client.get("class") == app_id
                       for client in self.clients(task)):
             if time.monotonic() >= deadline:
                 raise TaskError("Task terminal did not appear with its app-id; check xdg-terminal-exec support")
@@ -160,3 +160,18 @@ def text_input(prompt, graphical=False):
 def lua_string(value):
     """Encode UTF-8 as Lua decimal byte escapes, avoiding JSON's incompatible unicode escapes."""
     return '"' + "".join(f"\\{byte:03d}" for byte in value.encode("utf-8")) + '"'
+
+
+def task_terminal_command(executable, task_id, shell=False):
+    """Keep an identifiable shell parent so Omarchy inherits the task terminal's CWD."""
+    command = [executable, "shell" if shell else "attach", task_id, "--active-only"]
+    if shell:
+        return command
+    # Omarchy checks the terminal's direct child against /etc/shells. The trailing exit prevents
+    # Bash from replacing itself with the agent; positional args keep paths out of shell syntax.
+    return ["/bin/bash", "-c", '"$@"; exit $?', "hyprgrid-agent", *command]
+
+
+def task_app_id(task_id):
+    """Use a GTK-valid application ID; each dotted component must start with a letter."""
+    return "org.hyprgrid.task" + task_id

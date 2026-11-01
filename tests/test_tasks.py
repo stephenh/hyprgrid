@@ -1,6 +1,8 @@
 """Exercise lifecycle boundaries with real jj workspaces and real repository hooks."""
 
 import json
+import ctypes
+import ctypes.util
 import os
 from pathlib import Path
 import subprocess
@@ -11,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tasks"))
 from core import Manager, Settings, Store, TaskError, task_environment
-from desktop import Desktop, lua_string, menu_rows
+from desktop import Desktop, lua_string, menu_rows, task_terminal_command, task_app_id
 
 
 class SessionService:
@@ -292,6 +294,30 @@ class TaskWorkspacesTest(unittest.TestCase):
         self.manager.archive_if_empty(task)
         # Then the failed task is archived too.
         self.assertEqual(self.store.get(task["id"])["state"], "archived")
+
+    def test_agent_terminal_retains_a_shell_parent_for_cwd_inheritance(self):
+        # Given a launcher that reports the process Omarchy would inspect.
+        launcher = self.root / "agent launcher"
+        launcher.write_text(f"#!{sys.executable}\nimport os\nprint(os.readlink(f'/proc/{{os.getppid()}}/exe'))\n")
+        launcher.chmod(0o755)
+        # When the task terminal launches its agent command.
+        result = subprocess.run(task_terminal_command(str(launcher), "task123"),
+                                cwd=self.root, capture_output=True, text=True, check=True)
+        # Then the terminal's direct child remains a recognized shell, not the agent.
+        self.assertEqual(result.stdout.strip(), str(Path("/bin/bash").resolve()))
+
+    def test_task_app_id_is_accepted_by_gtk(self):
+        # Given GTK's actual application-ID validator, also used by Ghostty.
+        library = ctypes.util.find_library("gio-2.0")
+        if not library:
+            self.skipTest("GLib is not installed")
+        gio = ctypes.CDLL(library)
+        gio.g_application_id_is_valid.argtypes = [ctypes.c_char_p]
+        gio.g_application_id_is_valid.restype = ctypes.c_int
+        # When validating a task ID beginning with a digit.
+        valid = gio.g_application_id_is_valid(task_app_id("81e982a8c759").encode())
+        # Then GTK accepts it instead of falling back to the default Ghostty class.
+        self.assertEqual(valid, 1)
 
 
 if __name__ == "__main__":

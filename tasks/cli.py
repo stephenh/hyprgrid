@@ -164,7 +164,6 @@ def desktop_menu(manager, action, task_id):
         name = text_input("Task name", graphical=True) if repo else None
         if not name:
             return
-        notify("Preparing task", name)
         with store.lock():
             task = manager.create(repo, name, desktop=True)
             manager.desktop.open(task)
@@ -292,7 +291,7 @@ def watch_tasks(store, agent, once=False):
 
 
 def notify(title, body):
-    """Surface background menu setup progress/errors through the desktop notifier."""
+    """Surface failed background operations through the desktop notifier."""
     subprocess.run(["notify-send", "--app-name=hyprgrid", "--", title, body], check=False)
 
 

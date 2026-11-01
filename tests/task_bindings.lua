@@ -40,7 +40,7 @@ H.scenario("a delayed task terminal rejoins column 2 even when its target cell d
   loadfile("task-workspaces.lua")()({ path = false })
   hyprgrid.reserve("abc123")
   -- When the tagged terminal maps on the currently focused monitor.
-  H.open("1", "hyprgrid-abc123")
+  H.open("1", "org.hyprgrid.taskabc123")
   H.timers()
   -- Then it belongs to column 2's monitor.
   H.eq(H.workspaces()["2a"].mon, "DP-2")

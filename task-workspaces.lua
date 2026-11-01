@@ -42,18 +42,20 @@ return function(options)
   -- Route by app-id rather than the focused workspace: setup may finish after the user switches tasks.
   -- Defer window movement until the native window-open callback has returned.
   hl.on("window.open", function(window)
-    local id = (window.initial_class or window.class or ""):match("^hyprgrid%-([a-z0-9]+)$")
+    local app_id = window.initial_class or window.class or ""
+    -- GTK rejects undotted app IDs; retain the old form for terminals opened by earlier versions.
+    local id = app_id:match("^org%.hyprgrid%.task([a-z0-9]+)$") or app_id:match("^hyprgrid%-([a-z0-9]+)$")
     local address = window.address
     if not id or not hyprgrid.rows[id] then return end
     hl.timer(function()
       local row = hyprgrid.rows[id]
       if not row then return end
       for _, candidate in ipairs(hl.get_windows()) do
-        if candidate.address == address and (candidate.initial_class or candidate.class) == "hyprgrid-" .. id then
+        if candidate.address == address and (candidate.initial_class or candidate.class) == app_id then
           hyprgrid.route_terminal(id, address)
         end
       end
-    end, { timeout = 0, type = "oneshot" })
+    end, { timeout = 1, type = "oneshot" })
   end)
 
   -- Capture identity before Hyprland removes the workspace. Archive runs outside the compositor,
@@ -79,7 +81,7 @@ return function(options)
         if workspace.name:match("^%d+" .. letter .. "$") and (workspace.windows or 0) > 0 then return end
       end
       hl.exec_cmd(command .. " archive-empty " .. id)
-    end, { timeout = 0, type = "oneshot" })
+    end, { timeout = 1, type = "oneshot" })
   end)
 
   hl.on("workspace.active", function(workspace)
