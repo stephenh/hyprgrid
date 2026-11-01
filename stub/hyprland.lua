@@ -180,13 +180,15 @@ end
 -- Keep a selector as-is (only stringify numbers) so a "name:" prefix survives to resolution. I.e. 10 -> "10".
 local function norm(sel) return type(sel) == "string" and sel or tostring(sel) end
 
--- Resolve a workspace selector the way Hyprland does for an EXISTING workspace: "name:X" matches by NAME; a
--- bare number matches by workspace ID/NUMBER (not by name); anything else by name. So a numbered workspace
--- renamed via default_name (e.g. id 10 shown as "0") is found by name:0 or by its id 10, but NOT by a bare
--- "0" -- which is why moving the roam column via its name broke once it was renamed 10 -> "0".
+-- Bare numbers address numbered IDs, not display names. Since Hyprland 0.57, name: also rejects
+-- numeric names, so workspace 10 displayed as "0" must be selected by 10, not 0 or name:0.
 local function resolve(sel)
   local nm = sel:match("^name:(.+)$")
-  if nm then return Stub._find(nm) end
+  if nm then
+    -- Hyprland 0.57's workspace Resolver.cpp explicitly rejects numeric name: selectors.
+    assert(not nm:match("^%d+$"), "Invalid workspace: name: cannot name a workspace with a number")
+    return Stub._find(nm)
+  end
   if sel:match("^%d+$") then
     local id = tonumber(sel)
     for _, w in ipairs(S.workspaces) do if w.id == id then return w end end
@@ -204,7 +206,8 @@ local function apply(desc)
     if desc.monitor then
       focus_monitor(desc.monitor)
     elseif desc.workspace then
-      focus_workspace(desc.workspace)
+      local ws = resolve(desc.workspace)
+      focus_workspace(ws and ws.name or desc.workspace:gsub("^name:", ""))
     end
   elseif op == "ws_move" then -- moveworkspacetomonitor
     local w = resolve(desc.workspace)
@@ -276,7 +279,7 @@ Stub.hl = hl
 hl.dsp = {
   focus = function(a)
     if a.monitor then return { op = "focus", monitor = a.monitor } end
-    return { op = "focus", workspace = sel_name(a.workspace) }
+    return { op = "focus", workspace = norm(a.workspace) }
   end,
   exec_cmd = function(cmd) return { op = "exec", cmd = cmd } end,
   submap = function(name) return { op = "submap", name = name } end,
@@ -328,7 +331,8 @@ end
 
 function hl.get_active_workspace()
   local m = focused_monitor()
-  return m and { name = m.active } or nil
+  local ws = m and Stub._find(m.active)
+  return ws and { name = ws.name, id = ws.id } or nil
 end
 
 function hl.bind(keys, cb, _opts)

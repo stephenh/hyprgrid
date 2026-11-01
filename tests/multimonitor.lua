@@ -22,7 +22,7 @@ H.scenario("the roam column (Super+0, renamed 10 -> \"0\") still moves across mo
   local Stub = require("stub.hyprland")
   H.boot()
   Stub.seed_window("0", "DP-2", 10)                       -- shown as "0", real id 10, on the MIDDLE monitor
-  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:0" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "10" }))
   H.press("SUPER + SHIFT + Y")                            -- move the column left
   H.eq((H.workspaces())["0"].mon, "DP-1", "roam moved left to DP-1")
   H.press("SUPER + SHIFT + O")                            -- and back right
@@ -104,13 +104,13 @@ H.scenario("a delayed home reassignment cannot undo moving a two-workspace colum
   Stub.seed_window("1a", "HDMI-A-1")
   -- And the home has a window so both pieces survive the move.
   H.open("1")
-  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:1", monitor = "HDMI-A-1" }))
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "1", monitor = "HDMI-A-1" }))
   H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1a" }))
 
   -- When the whole column moves left twice, but the home is reassigned to the old monitor afterward.
   H.press("SUPER + SHIFT + Y")
   H.press("SUPER + SHIFT + Y")
-  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:1", monitor = "HDMI-A-1" }))
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "1", monitor = "HDMI-A-1" }))
   H.timers()
 
   -- Then healing respects the explicit destination instead of pulling the tag back in the tie.
@@ -127,7 +127,7 @@ H.scenario("healing brings a drifted home to the explicitly moved tag", function
 
   -- When the column moves right but the home drifts back before healing.
   H.press("SUPER + SHIFT + O")
-  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:1", monitor = "DP-1" }))
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "1", monitor = "DP-1" }))
   H.timers()
 
   -- Then the home rejoins the tag at the requested destination.
@@ -145,7 +145,7 @@ H.scenario("an output layout change clears the explicit column destination", fun
 
   -- When hotplug changes the layout and the home drifts to monitor 1.
   H.add_mon("DP-3", 7680)
-  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:1", monitor = "DP-1" }))
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "1", monitor = "DP-1" }))
   H.timers()
 
   -- Then the normal home tie-breaker applies again.

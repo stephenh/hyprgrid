@@ -69,6 +69,13 @@ local function selector_for(col, row)
   return "name:" .. ws_name_for(col, row)
 end
 
+-- Hyprland 0.57 rejects name: selectors for numbers. Use the real numbered ID, not its display
+-- name (Super+0 displays "0" but remains ID 10). Named grid cells have no numbered ID in 0.57.
+local function selector_for_workspace(ws)
+  if ws.id and ws.id > 0 then return tostring(ws.id) end
+  return "name:" .. ws.name
+end
+
 -- Name of the focused monitor. I.e. "DP-2".
 local function focused_monitor()
   for _, m in ipairs(hl.get_monitors()) do
@@ -157,7 +164,7 @@ local function heal_split_columns()
   for _, ws in ipairs(hl.get_workspaces()) do
     local col = cell_of(ws.name)
     if col and ws.monitor and anchor[col] and ws.monitor.name ~= anchor[col] then
-      hl.dispatch(hl.dsp.workspace.move({ workspace = "name:" .. ws.name, monitor = anchor[col] }))
+      hl.dispatch(hl.dsp.workspace.move({ workspace = selector_for_workspace(ws), monitor = anchor[col] }))
     end
   end
   if origin then hl.dispatch(hl.dsp.focus({ monitor = origin })) end
@@ -403,19 +410,19 @@ local function move_column_to_monitor(dir)
   -- Move the inactive tags first, then the focused workspace LAST. Moving the focused workspace carries
   -- focus with it and surfaces it on the destination, so no manual refocus is needed -- an extra focus
   -- dispatch only bounces us back off the destination, leaving the column hidden behind its old window.
-  local active_name = (hl.get_active_workspace() or {}).name
+  local active = hl.get_active_workspace()
+  local active_name = active and active.name
   relocating = true -- this move is deliberate; keep heal_split_columns from fighting the transient split
-  -- Move each workspace by its actual name (`name:<name>`), not a column-derived selector. A bare selector
-  -- resolves by workspace NUMBER, so a workspace renamed away from its number (Super+0's id-10 shown as "0")
-  -- wouldn't be found by "0" -- name: matches the name and always resolves an existing workspace.
+  -- Select each existing workspace by its real ID/name, not the column's display label. This also
+  -- handles Super+0's numbered workspace, whose display name differs from its ID.
   for _, ws in ipairs(hl.get_workspaces()) do
     local c = cell_of(ws.name)
     if c == col and ws.name ~= active_name then
-      hl.dispatch(hl.dsp.workspace.move({ workspace = "name:" .. ws.name, monitor = target }))
+      hl.dispatch(hl.dsp.workspace.move({ workspace = selector_for_workspace(ws), monitor = target }))
     end
   end
   if active_name then
-    hl.dispatch(hl.dsp.workspace.move({ workspace = "name:" .. active_name, monitor = target }))
+    hl.dispatch(hl.dsp.workspace.move({ workspace = selector_for_workspace(active), monitor = target }))
   end
   relocating = false
 end
