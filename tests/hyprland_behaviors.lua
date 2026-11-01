@@ -123,3 +123,15 @@ H.scenario("behavior: renaming onto an existing name yields a DUPLICATE (the 2a 
   local _, dups = H.workspaces()
   H.assert(dups["2a"], "expected the stub to model a duplicate 2a (it should, to catch the real bug)")
 end)
+
+H.scenario("behavior: window.destroy can deliver nil after the weak reference expires", function()
+  -- Given a window and a listener for destruction.
+  H.boot_bare()
+  local address = H.open("1")
+  local destroyed = "not called"
+  hl.on("window.destroy", function(window) destroyed = window end)
+  -- When Hyprland cannot lock the destroyed window's weak reference.
+  H.close(address, true)
+  -- Then Lua receives nil, not a window object.
+  H.eq(destroyed, nil)
+end)

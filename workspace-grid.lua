@@ -588,14 +588,14 @@ function hyprgrid.jump(id, column)
   end
 end
 
--- A delayed terminal may map after its empty target cell disappeared. Rejoin the terminal column
+-- A delayed task window may map after its empty target cell disappeared. Rejoin its tool column
 -- using the same tested healing logic as other column moves, then compact the row it left.
-function hyprgrid.route_terminal(id, address)
-  local row = hyprgrid.rows[id]
-  if not row then return end
+function hyprgrid.route_window(address, workspace, follow)
   hl.dispatch(hl.dsp.window.move({ window = "address:" .. address,
-    workspace = selector_for("2", row), follow = false }))
+    workspace = workspace, follow = false }))
   heal_split_columns()
+  -- Zed can activate a different workspace while launching; follow only after placing its window.
+  if follow then hl.dispatch(hl.dsp.focus({ workspace = workspace })) end
   schedule_reconcile()
 end
 

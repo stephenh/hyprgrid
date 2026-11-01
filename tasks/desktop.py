@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import time
 
@@ -33,15 +34,15 @@ class Desktop:
         """Let the grid compact rows after a successful archive."""
         self.evaluate(f'hyprgrid.release({lua_string(task["id"])})')
 
-    def jump(self, task, terminal=False):
-        """Preserve the current tool column, unless opening the task's terminal."""
-        column = ', "2"' if terminal else ""
-        self.evaluate(f'hyprgrid.jump({lua_string(task["id"])}{column})')
+    def jump(self, task, column=None):
+        """Preserve the current tool column unless a launch selects one explicitly."""
+        argument = ", " + lua_string(column) if column else ""
+        self.evaluate(f'hyprgrid.jump({lua_string(task["id"])}{argument})')
 
     def open(self, task, shell=False):
         """Launch a tagged native terminal; the Lua adapter routes its eventual window."""
         self.reserve(task)
-        self.jump(task, terminal=True)
+        self.jump(task, column="2")
         app_id = task_app_id(task["id"])
         command = ["xdg-terminal-exec", f'--app-id={app_id}',
                    f'--dir={task["path"]}', "--"]
@@ -55,6 +56,32 @@ class Desktop:
             if time.monotonic() >= deadline:
                 raise TaskError("Task terminal did not appear with its app-id; check xdg-terminal-exec support")
             time.sleep(0.1)
+
+    def open_browser(self, profile, task=None):
+        """Create a fresh Chromium window, bypassing its reuse-existing-window profile chooser."""
+        if task:
+            if task["id"] not in self.store.rows():
+                raise TaskError("Task no longer has a desktop row")
+            self.jump(task, column="3")
+        # Omarchy's browser launcher may focus an existing window after handing off the command.
+        # Chromium itself honors --new-window when a profile is selected explicitly.
+        command = ["uwsm-app", "--", "chromium", "--profile-directory=" + profile,
+                   "--new-window", "about:blank"]
+        self.evaluate(f"hl.exec_cmd({lua_string(shlex.join(command))})")
+
+    def open_zed(self, task):
+        """Open the task checkout as a new Zed project on the launch workspace."""
+        editor = shutil.which("zeditor") or shutil.which("zed")
+        if not editor:
+            raise TaskError("Zed is not installed")
+        if not Path(task["path"]).is_dir():
+            raise TaskError("Task checkout is missing")
+        if task["id"] not in self.store.rows():
+            raise TaskError("Task no longer has a desktop row")
+        # Set both the launcher CWD and project path; --new prevents reusing another task's window.
+        command = ["env", "--chdir=" + task["path"], "uwsm-app", "--", editor, "--new", task["path"]]
+        self.evaluate(f'hyprgrid.prepare_zed({lua_string(task["id"])}); '
+                      f"hl.exec_cmd({lua_string(shlex.join(command))})")
 
     def clients(self, task):
         """Resolve the current row each time; a previous archive may have compacted it."""
@@ -175,3 +202,13 @@ def task_terminal_command(executable, task_id, shell=False):
 def task_app_id(task_id):
     """Use a GTK-valid application ID; each dotted component must start with a letter."""
     return "org.hyprgrid.task" + task_id
+
+
+def chromium_profiles():
+    """Read Chromium's existing profile names without starting its window-reusing chooser."""
+    path = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "chromium/Local State"
+    if not path.exists():
+        return [("Default", "Default", "Default")]
+    profiles = json.loads(path.read_text()).get("profile", {}).get("info_cache", {})
+    return [(directory, info.get("name") or directory, directory)
+            for directory, info in sorted(profiles.items()) if not info.get("is_omitted")]

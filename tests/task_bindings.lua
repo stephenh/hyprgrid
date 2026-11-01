@@ -174,3 +174,66 @@ H.scenario("unmanaged rows also stay put when task mode is enabled", function()
   -- Then b retains its letter instead of consuming the free slot.
   H.expect_windows("2b", 1)
 end)
+
+H.scenario("browser shortcut captures the current task before opening the profile picker", function()
+  -- Given a managed task viewed from its terminal column.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  hyprgrid.reserve("abc123")
+  Stub.seed_window("2a", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2a" }))
+  -- When requesting a new browser window.
+  H.press("SUPER + SHIFT + RETURN")
+  -- Then the picker receives the stable task identity.
+  H.eq(Stub.S().log[#Stub.S().log], "exec:hyprgrid-task menu browser --task abc123")
+end)
+
+H.scenario("Zed opening on the wrong row returns to its launch workspace", function()
+  -- Given Zed launched from task c's terminal workspace.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  hyprgrid.rows.abc123 = 4
+  H.hl.dispatch(H.hl.dsp.focus({ monitor = "DP-2" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2c" }))
+  hyprgrid.prepare_zed("abc123")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2d" }))
+  -- When the new Zed window maps with its task project title.
+  H.open("2d", "dev.zed.Zed", "biff-biff-abc123")
+  H.timers()
+  -- Then the window stays in the workspace where it was launched.
+  H.expect_windows("2c", 1)
+end)
+
+H.scenario("routing Zed restores focus to its launch monitor", function()
+  -- Given a launch on the terminal monitor before Zed displaces focus.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  hyprgrid.rows.abc123 = 4
+  H.hl.dispatch(H.hl.dsp.focus({ monitor = "DP-2" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2c" }))
+  hyprgrid.prepare_zed("abc123")
+  H.hl.dispatch(H.hl.dsp.focus({ monitor = "DP-1" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1d" }))
+  -- When the window-open handler completes.
+  H.open("1d", "dev.zed.Zed", "biff-biff-abc123")
+  H.timers()
+  -- Then focus returns to the launch monitor.
+  H.expect_focused("DP-2")
+end)
+
+H.scenario("auto-archive survives a destroyed window with an expired reference", function()
+  -- Given the last window in a managed task.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  hyprgrid.reserve("abc123")
+  local window = Stub.seed_window("2a", "DP-2")
+  -- When destruction delivers nil instead of a live window object.
+  H.close(window, true)
+  H.timers()
+  -- Then auto-archive still receives the identity captured before destruction.
+  local requests = {}
+  for _, entry in ipairs(Stub.S().log) do
+    if entry:find("archive%-empty") then requests[#requests + 1] = entry end
+  end
+  H.eq(table.concat(requests, "\n"), "exec:hyprgrid-task archive-empty abc123")
+end)

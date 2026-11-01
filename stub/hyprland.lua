@@ -313,6 +313,7 @@ function hl.get_windows()
   local windows = {}
   for _, win in ipairs(S.windows) do
     windows[#windows + 1] = { address = win.addr, class = win.class, initial_class = win.class,
+      title = win.title, initial_title = win.title,
       workspace = { name = win.ws } }
   end
   return windows
@@ -402,17 +403,18 @@ Stub.run_timers = function()
   local t = S.timers; S.timers = {}
   for _, cb in ipairs(t) do cb() end
 end
-Stub.open_window = function(ws, class)
+Stub.open_window = function(ws, class, title)
   ws = ws or (focused_monitor() and focused_monitor().active)
   if not Stub._find(ws) then Stub._create(ws, focused_monitor().name) end -- a window creates its workspace
   S.next_addr = S.next_addr + 1
   local addr = string.format("0x%x", S.next_addr)
-  S.windows[#S.windows + 1] = { addr = addr, ws = ws, class = class }
+  S.windows[#S.windows + 1] = { addr = addr, ws = ws, class = class, title = title }
   refresh_counts()
-  fire("window.open", { address = addr, class = class, initial_class = class, workspace = { name = ws } })
+  fire("window.open", { address = addr, class = class, initial_class = class,
+    title = title, initial_title = title, workspace = { name = ws } })
   return addr
 end
-Stub.close_window = function(addr)
+Stub.close_window = function(addr, missing_destroy_window)
   local window, window_index
   for i, x in ipairs(S.windows) do
     if x.addr == addr then window, window_index = x, i; break end
@@ -445,7 +447,8 @@ Stub.close_window = function(addr)
 
   gc()
   S.destroying_window = true
-  fire("window.destroy", event)
+  -- Hyprland locks a weak window reference for destroy; an expired reference becomes nil in Lua.
+  if missing_destroy_window then fire("window.destroy", nil) else fire("window.destroy", event) end
   S.destroying_window = false
   gc()
 end

@@ -81,6 +81,16 @@ The standalone grid without the task adapter retains its original auto-compactio
 `Super+D` renames the managed task for the current row. Its task name is also the
 bar's workspace description, so there is no second name to synchronize. On unmanaged
 rows and home workspaces, `Super+D` keeps the original workspace-description prompt.
+
+`Super+Shift+Enter` opens an Omarchy picker for your existing Chromium profiles, then
+creates a **new window** for the selected profile. In a managed task it launches from
+column 3 of that task's row; elsewhere it launches from the current workspace. The
+same action is available as **New browser window** under `Super+T → Space`. This
+bypasses Chromium's profile chooser, which can focus an existing window instead.
+
+`Super+T → Space → Zed` opens a new Zed window on the current workspace, with
+the task checkout as its working directory and project. It uses `zeditor` on Arch,
+or `zed` if that is the installed command.
 While managed tasks exist, columns 1 (IDE), 2 (terminals), and 3 (browser) participate
 even before their first window opens. Other columns join when they have grid windows.
 Pass a `columns` map to the Lua adapter to customize the always-participating tools.

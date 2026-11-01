@@ -39,12 +39,29 @@ return function(options)
     assert(os.rename(path .. ".tmp", path))
   end
 
-  -- Route by app-id rather than the focused workspace: setup may finish after the user switches tasks.
+  -- Capture the launch workspace before Zed can activate a different one.
+  hyprgrid.zed_targets = {}
+  function hyprgrid.prepare_zed(id)
+    local workspace = hl.get_active_workspace()
+    hyprgrid.zed_targets[id] = workspace.name:match("^%d+$") and tostring(workspace.id)
+      or "name:" .. workspace.name
+  end
+
+  -- Route by task identity rather than focus: applications can map after focus changes.
   -- Defer window movement until the native window-open callback has returned.
   hl.on("window.open", function(window)
     local app_id = window.initial_class or window.class or ""
     -- GTK rejects undotted app IDs; retain the old form for terminals opened by earlier versions.
     local id = app_id:match("^org%.hyprgrid%.task([a-z0-9]+)$") or app_id:match("^hyprgrid%-([a-z0-9]+)$")
+    local target, follow
+    if app_id == "dev.zed.Zed" then
+      -- Task checkout basenames end in the stable ID, which Zed includes in its initial title.
+      id = (window.initial_title or window.title or ""):match("%-([a-z0-9]+)$")
+      target = id and hyprgrid.zed_targets[id]
+      if not target then return end
+      hyprgrid.zed_targets[id] = nil
+      follow = true
+    end
     local address = window.address
     if not id or not hyprgrid.rows[id] then return end
     hl.timer(function()
@@ -52,27 +69,24 @@ return function(options)
       if not row then return end
       for _, candidate in ipairs(hl.get_windows()) do
         if candidate.address == address and (candidate.initial_class or candidate.class) == app_id then
-          hyprgrid.route_terminal(id, address)
+          target = target or "name:2" .. string.char(string.byte("a") + row - 2)
+          hyprgrid.route_window(address, target, follow)
         end
       end
     end, { timeout = 1, type = "oneshot" })
   end)
 
-  -- Capture identity before Hyprland removes the workspace. Archive runs outside the compositor,
-  -- after destruction, and the coordinator rechecks the row under its lifecycle lock.
-  local closing_tasks = {}
+  -- Capture identity on close: window.destroy can receive nil after its weak reference expires.
+  -- Defer the empty-row check until close returns; the coordinator rechecks under its lifecycle lock.
   hl.on("window.close", function(window)
     local letter = window.workspace and window.workspace.name:match("^%d+([a-l])$")
     if not letter or not window.address then return end
     local row = letter:byte() - string.byte("a") + 2
-    for id, reserved in pairs(hyprgrid.rows) do
-      if row == reserved then closing_tasks[window.address] = id; return end
+    local id
+    for task_id, reserved in pairs(hyprgrid.rows) do
+      if row == reserved then id = task_id; break end
     end
-  end)
-  hl.on("window.destroy", function(window)
-    local id = closing_tasks[window.address]
     if not id then return end
-    closing_tasks[window.address] = nil
     hl.timer(function()
       local row = hyprgrid.rows[id]
       if not row then return end
@@ -119,6 +133,10 @@ return function(options)
   hl.unbind("SUPER + D") -- replaces the grid's description-only prompt
   hl.bind("SUPER + D", function() action("rename") end,
     { description = "Rename task or workspace" })
+
+  hl.unbind("SUPER + SHIFT + RETURN") -- replaces Chromium's reuse-or-launch profile chooser
+  hl.bind("SUPER + SHIFT + RETURN", function() action("browser") end,
+    { description = "New browser window (choose profile)" })
 
   hl.unbind("SUPER + T") -- replaces OpenWhispr tap-to-dictate
   hl.bind("SUPER + T", function()

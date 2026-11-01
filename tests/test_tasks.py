@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tasks"))
 from core import Manager, Settings, Store, TaskError, task_environment
-from desktop import Desktop, lua_string, menu_rows, task_terminal_command, task_app_id
+from desktop import Desktop, chromium_profiles, lua_string, menu_rows, task_terminal_command, task_app_id
 
 
 class SessionService:
@@ -318,6 +318,18 @@ class TaskWorkspacesTest(unittest.TestCase):
         valid = gio.g_application_id_is_valid(task_app_id("81e982a8c759").encode())
         # Then GTK accepts it instead of falling back to the default Ghostty class.
         self.assertEqual(valid, 1)
+
+    def test_browser_profile_picker_keeps_same_named_profiles_distinct(self):
+        # Given two Chromium profiles with the same display name.
+        path = Path(os.environ["XDG_CONFIG_HOME"]) / "chromium/Local State"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"profile": {"info_cache": {
+            "Default": {"name": "Personal"}, "Profile 1": {"name": "Personal"},
+        }}}))
+        # When reading choices and decoding Omarchy's selection of the second profile.
+        rows = menu_rows(chromium_profiles())
+        # Then the directory identity survives the duplicate label.
+        self.assertEqual(rows["Personal\tProfile 1"], "Profile 1")
 
 
 if __name__ == "__main__":

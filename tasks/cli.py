@@ -10,7 +10,7 @@ import sys
 import time
 
 from core import Manager, OpenCode, Settings, Store, TaskError, task_environment, task_name
-from desktop import Desktop, pick, text_input
+from desktop import Desktop, chromium_profiles, pick, text_input
 
 
 def main():
@@ -40,7 +40,7 @@ def main():
         if name == "delete":
             command.add_argument("--yes", action="store_true")
     menu = commands.add_parser("menu", help="Omarchy-native task actions")
-    menu.add_argument("action", choices=["new", "switch", "snooze", "archive", "restore", "actions", "rename"])
+    menu.add_argument("action", choices=["new", "switch", "snooze", "archive", "restore", "actions", "rename", "browser"])
     menu.add_argument("--task")
     watch = commands.add_parser("watch", help="Publish OpenCode activity for the bar and pickers")
     watch.add_argument("--once", action="store_true")
@@ -159,6 +159,13 @@ def execute_action(manager, action, task_id, args):
 def desktop_menu(manager, action, task_id):
     """Gather input before locking so an abandoned menu never blocks other operations."""
     store = manager.store
+    if action == "browser":
+        profile = pick("New browser window", chromium_profiles(), graphical=True)
+        if profile is not None:
+            with store.lock():
+                task = store.get(task_id) if task_id else None
+                manager.desktop.open_browser(profile, task)
+        return
     if action == "new":
         repo = choose_repo(manager.settings, graphical=True)
         name = text_input("Task name", graphical=True) if repo else None
@@ -183,10 +190,14 @@ def desktop_menu(manager, action, task_id):
     task = store.get(task_id)
     if action == "actions":
         choices = [(name, label, "") for name, label in (
-            ("open", "Open agent"), ("shell", "New terminal"), ("rename", "Rename"),
+            ("open", "Open agent"), ("shell", "New terminal"), ("browser", "New browser window"),
+            ("zed", "Zed"), ("rename", "Rename"),
             ("snooze", "Snooze"), ("archive", "Archive"), ("delete", "Delete task and workspace"))]
         action = pick(task["name"], choices, graphical=True)
         if not action:
+            return
+        if action == "browser":
+            desktop_menu(manager, action, task_id)
             return
     value = None
     if action == "snooze":
@@ -220,6 +231,8 @@ def desktop_menu(manager, action, task_id):
             manager.archive(task)
         elif action == "delete":
             manager.delete(task)
+        elif action == "zed":
+            manager.desktop.open_zed(task)
         elif action == "rename":
             task["name"] = task_name(value)
             store.save(task)
