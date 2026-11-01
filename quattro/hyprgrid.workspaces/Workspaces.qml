@@ -15,7 +15,6 @@ BarWidget {
   readonly property string tasksPath: (Quickshell.env("HYPRGRID_STATE_DIR") || stateHome + "/hyprgrid")
   property var tasks: ({})
   property var taskRows: ({})
-  property double now: Date.now()
   readonly property var monitor: root.QsWindow.window ? Hyprland.monitorFor(root.QsWindow.window.screen) : null
   readonly property bool monitorFocused: monitor !== null && Hyprland.focusedMonitor !== null && monitor.name === Hyprland.focusedMonitor.name
   readonly property var activeWorkspace: monitor && monitor.activeWorkspace ? monitor.activeWorkspace : Hyprland.focusedWorkspace
@@ -23,7 +22,7 @@ BarWidget {
     if (!activeWorkspace) return ""
     var task = taskForWorkspace(activeWorkspace.name)
     // Omarchy's WidgetButton label uses Text.PlainText; names need no HTML escaping.
-    if (task) return task.name + " — " + taskStatus(task)
+    if (task) return task.name
     var value = descriptions[descriptionKey(activeWorkspace.name)]
     return value === undefined || value === null ? "" : String(value)
   }
@@ -49,16 +48,6 @@ BarWidget {
   function taskForWorkspace(name) {
     var match = String(name || "").match(/^\d+([a-l])$/)
     return match ? tasks[taskRows[match[1]]] || null : null
-  }
-
-  function taskStatus(task) {
-    if (task.snoozed_until * 1000 > root.now) return "snoozed"
-    return task.state === "active" ? task.activity || "unknown" : task.state
-  }
-
-  function taskAttention(task) {
-    if (task.snoozed_until * 1000 > root.now || task.state === "archived") return false
-    return task.state.indexOf("failed") !== -1 || ["needs-input", "ready", "error"].indexOf(task.activity) !== -1
   }
 
   function descriptionKey(name) {
@@ -179,9 +168,6 @@ BarWidget {
     onLoadFailed: root.taskRows = ({})
   }
 
-  // Snooze expiry is wall-clock state even when the agent's activity does not change.
-  Timer { interval: 1000; running: true; repeat: true; onTriggered: root.now = Date.now() }
-
   Connections {
     target: Hyprland.workspaces
     function onValuesChanged() { root.syncWorkspaceModel() }
@@ -241,11 +227,11 @@ BarWidget {
           readonly property var task: root.taskForWorkspace(workspaceName)
           readonly property bool occupied: workspace !== null && workspace.toplevels.values.length > 0
           readonly property bool focused: root.activeWorkspace !== null && root.activeWorkspace.name === workspaceName
-          readonly property bool urgent: task ? root.taskAttention(task) : workspace !== null && workspace.urgent
+          readonly property bool urgent: !task && workspace !== null && workspace.urgent
           readonly property bool current: focused && root.monitorFocused
 
           bar: root.bar
-          text: workspaceName + (task && task.activity === "working" ? "·" : "")
+          text: workspaceName
           labelVisible: false
           active: focused || urgent
           opacity: occupied || focused || urgent ? 1 : 0.5

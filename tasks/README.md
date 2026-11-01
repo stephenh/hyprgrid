@@ -33,9 +33,8 @@ tap-to-dictate) with the task prefix. Do not drive workspace-move tests on the l
 desktop; the user performs those smoke tests.
 
 Deploy the updated `quattro/hyprgrid.workspaces/Workspaces.qml` using the plugin's
-diff/backup workflow, then **run `omarchy restart shell`**. The bar reads task names,
-activity, and snooze state. A dot after a workspace label means its agent is working.
-Managed task attention replaces terminal-bell urgency so snoozing actually suppresses it.
+diff/backup workflow, then **run `omarchy restart shell`**. The bar shows task names
+without agent status, activity dots, or managed-task urgency highlighting.
 
 For background activity updates, install `hyprgrid-tasks.service` under
 `~/.config/systemd/user/`, then:
