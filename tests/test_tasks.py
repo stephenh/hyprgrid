@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tasks"))
 from core import Manager, Settings, Store, TaskError, task_environment
-from desktop import Desktop, chromium_profiles, lua_string, menu_rows, task_terminal_command, task_app_id
+from desktop import Desktop, chromium_profiles, lua_string, menu_rows, task_terminal_command, task_terminal_launch, task_app_id
 
 
 class SessionService:
@@ -348,6 +348,20 @@ class TaskWorkspacesTest(unittest.TestCase):
         self.manager.delete(task)
         # Then its empty container is also removed.
         self.assertFalse(container.exists())
+
+
+    def test_desktop_shell_uses_terminal_default_command(self):
+        # Given a task and a terminal launcher that reports its received arguments.
+        task = {"id": "abc123", "repo": str(self.repo), "path": str(self.root / "checkout")}
+        launcher = self.root / "xdg-terminal-exec"
+        launcher.write_text(f"#!{sys.executable}\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n")
+        launcher.chmod(0o755)
+        # When opening a desktop shell through the real command chain.
+        with patch.dict(os.environ, {"PATH": str(self.root) + ":" + os.environ["PATH"]}):
+            result = subprocess.run(task_terminal_launch("hyprgrid-task", task, shell=True),
+                                    capture_output=True, text=True, check=True)
+        # Then only terminal options are supplied, allowing its configured shell to start.
+        self.assertEqual(json.loads(result.stdout), ["--app-id=org.hyprgrid.taskabc123", f'--dir={task["path"]}'])
 
 
 if __name__ == "__main__":

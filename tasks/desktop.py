@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import time
 
-from core import TaskError, run
+from core import TaskError, run, task_environment
 
 
 class Desktop:
@@ -44,9 +44,7 @@ class Desktop:
         self.reserve(task)
         self.jump(task, column="2")
         app_id = task_app_id(task["id"])
-        command = ["xdg-terminal-exec", f'--app-id={app_id}',
-                   f'--dir={task["path"]}', "--"]
-        command += task_terminal_command(self.executable, task["id"], shell)
+        command = task_terminal_launch(self.executable, task, shell)
         # Hyprland launches with the desktop environment even when invoked by another client.
         self.evaluate(f"hl.exec_cmd({lua_string(shlex.join(command))})")
         deadline = time.monotonic() + 10
@@ -189,14 +187,24 @@ def lua_string(value):
     return '"' + "".join(f"\\{byte:03d}" for byte in value.encode("utf-8")) + '"'
 
 
-def task_terminal_command(executable, task_id, shell=False):
+def task_terminal_command(executable, task_id):
     """Keep an identifiable shell parent so Omarchy inherits the task terminal's CWD."""
-    command = [executable, "shell" if shell else "attach", task_id, "--active-only"]
-    if shell:
-        return command
+    command = [executable, "attach", task_id, "--active-only"]
     # Omarchy checks the terminal's direct child against /etc/shells. The trailing exit prevents
     # Bash from replacing itself with the agent; positional args keep paths out of shell syntax.
     return ["/bin/bash", "-c", '"$@"; exit $?', "hyprgrid-agent", *command]
+
+
+def task_terminal_launch(executable, task, shell=False):
+    """Let desktop shell terminals use their configured shell, preserving task environment and CWD."""
+    environment = task_environment(task)
+    command = ["env", *[f"{key}={value}" for key, value in environment.items()
+                        if os.environ.get(key) != value],
+               "xdg-terminal-exec", f'--app-id={task_app_id(task["id"])}', f'--dir={task["path"]}']
+    # Passing a command overrides Ghostty's configured Fish with the login shell (often Bash).
+    if not shell:
+        command += ["--", *task_terminal_command(executable, task["id"])]
+    return command
 
 
 def task_app_id(task_id):

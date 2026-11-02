@@ -10,6 +10,8 @@ return function(options)
   hyprgrid.columns = options.columns or { ["1"] = true, ["2"] = true, ["3"] = true }
   -- Keep letter shortcuts stable; new/restored tasks claim holes instead of shifting other rows.
   hyprgrid.stable_rows = true
+  -- Omarchy's universal clipboard shortcuts select Ctrl+Shift+C/V using this tag.
+  o.window("(org\\.hyprgrid\\.task[a-z0-9]+|hyprgrid-[a-z0-9]+)", { tag = "+terminal" })
   local hint
 
   -- A tiny data-only file avoids evaluating generated Lua in the compositor.

@@ -376,6 +376,7 @@ function o.bind(keys, _desc, cb, _opts)
   -- string commands / launch-spec tables are no-ops in the stub
 end
 function o.exec_on_start(_cmd) end
+function o.window(_match, _rules) end -- native window rules are applied by Hyprland, not this grid model
 
 -- ------------------------------------------------------------------ control surface for the harness
 Stub.S = function() return S end
