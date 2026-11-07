@@ -251,3 +251,104 @@ H.scenario("Zed routes a clean repository title back to its launch workspace", f
   -- Then it returns to the captured launch workspace.
   H.expect_windows("2c", 1)
 end)
+
+H.scenario("promoting an unmanaged row claims its existing letter", function()
+  -- Given windows in two columns of unmanaged row c.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("1c", "DP-1")
+  local window = Stub.seed_window("2c", "DP-2")
+  -- When promoting that row instead of allocating a free slot.
+  hyprgrid.adopt("promoted", window)
+  -- Then the managed task owns c, not the first empty row a.
+  H.eq(hyprgrid.rows.promoted, 4)
+end)
+
+H.scenario("promotion leaves the existing terminal in place", function()
+  -- Given an unmanaged row with windows on separate monitors.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("1b", "DP-1")
+  local window = Stub.seed_window("2b", "DP-2")
+  -- When promoting it.
+  hyprgrid.adopt("promoted", window)
+  -- Then its terminal remains in the original workspace.
+  H.expect_windows("2b", 1)
+end)
+
+H.scenario("promotion cannot steal another managed task's row", function()
+  -- Given a managed row with an existing window.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  hyprgrid.reserve("owner")
+  local window = Stub.seed_window("2a", "DP-2")
+  -- When another task attempts to adopt its row.
+  local success = pcall(hyprgrid.adopt, "promoted", window)
+  -- Then the adoption is rejected.
+  H.eq(success, false)
+end)
+
+H.scenario("promotion rejects a window closed while the menus were open", function()
+  -- Given an unmanaged row whose representative window has closed.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  local window = Stub.seed_window("2a", "DP-2")
+  local address = window
+  H.close(window)
+  H.timers()
+  -- When the stale promotion request arrives.
+  local success = pcall(hyprgrid.adopt, "promoted", address)
+  -- Then it does not adopt a now-empty or reused letter.
+  H.eq(success, false)
+end)
+
+H.scenario("promotion does not turn a home workspace into a task", function()
+  -- Given a terminal on a home workspace.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  local window = Stub.seed_window("2", "DP-2")
+  -- When attempting promotion.
+  local success = pcall(hyprgrid.adopt, "promoted", window)
+  -- Then no home row is registered as a task.
+  H.eq(success, false)
+end)
+
+H.scenario("unmanaged row actions capture a window before launching the menu", function()
+  -- Given focus on an unmanaged row's terminal workspace.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  local window = Stub.seed_window("2b", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2b" }))
+  -- When opening task actions.
+  H.press("SUPER + T")
+  H.press("space")
+  -- Then the menu can identify that row even if focus changes during the prompts.
+  H.eq(Stub.S().log[#Stub.S().log], "exec:hyprgrid-task menu actions --window " .. window)
+end)
+
+H.scenario("promotion persists the existing letter across reload", function()
+  -- Given an unmanaged row and a persistent assignment file.
+  local path = os.tmpname()
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = path })
+  local window = Stub.seed_window("3c", "HDMI-A-1")
+  -- When promoting it and reloading the adapter.
+  hyprgrid.adopt("promoted", window)
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = path })
+  os.remove(path)
+  -- Then the managed task still owns c.
+  H.eq(hyprgrid.rows.promoted, 4)
+end)
+
+H.scenario("promotion does not focus the promoted row", function()
+  -- Given work focused on another monitor while a promotion menu is open.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  local window = Stub.seed_window("3c", "HDMI-A-1")
+  H.hl.dispatch(H.hl.dsp.focus({ monitor = "DP-1" }))
+  -- When completing promotion of c.
+  hyprgrid.adopt("promoted", window)
+  -- Then focus remains where the user left it.
+  H.expect_focused("DP-1")
+end)

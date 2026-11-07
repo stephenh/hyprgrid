@@ -27,6 +27,23 @@ rows (`a–l`). No agent orchestration, PR tracking, or desktop-session restorat
   Qualify duplicate repository names with their discovery root.
 - Renaming a task or changing its row does not rename its directory.
 - Start new jj workspaces from the repository's default branch.
+- Alternatively, register an existing working copy under the discovery roots (or an
+  explicit CLI path). Use its current change in place; do not create a jj workspace,
+  run environment hooks, or override its Compose project. Archive closes the task's
+  windows and stops its managed agent, but leaves checkout services alone. Delete
+  removes only the task record, never the borrowed directory or jj workspace.
+- Existing-working-copy discovery deduplicates resolved paths, not shared jj repositories.
+  Each working copy can belong to only one task, including archived tasks.
+- An unmanaged desktop row can be promoted in place and associated with an existing
+  working copy. `Super+T → Space` starts the checkout picker directly for an
+  unmanaged row and keeps the normal actions menu for a managed row. Keep every window
+  and the row's letter; do not open another terminal
+  or implicitly adopt existing agent conversations. Recheck ownership using a window
+  captured before prompting. Future managed launches use the selected working copy;
+  existing shells and editor projects are not reconfigured.
+- Existing-working-copy tasks and promotions default to the checkout directory's
+  name without a naming prompt. Keep that name until an explicit rename; CLI users
+  can override it with `--name` at creation.
 - Per-repository settings specify dependency/test setup and environment teardown.
 - Creation reports preparing, ready, or setup failure. Archive retains dependencies.
 
@@ -53,8 +70,9 @@ leaves cleanup visibly incomplete rather than reporting successful archive/delet
 
 ## Lifecycle
 
-- **Create:** choose repo → enter name → create jj workspace → prepare environment →
-  launch OpenCode. There is no harness picker.
+- **Create:** choose existing working copy or new jj workspace → choose repo/checkout →
+  use its directory name for an existing copy, or prompt for a new workspace's task name →
+  create/prepare only for a new workspace → launch OpenCode. There is no harness picker.
 - **Snooze:** suppress task attention until the chosen time; leave work running.
 - **Archive:** stop active task execution and shut down its task-owned environment,
   then release the row. Preserve task metadata, checkout, dependencies, and session
@@ -128,7 +146,10 @@ task operations.
 The implementation and installation guide is in [tasks/README.md](tasks/README.md).
 The coordinator uses OpenCode V2's session/environment APIs and native `--session`
 attachment. Archive interrupts the session tree and removes its daemon-owned shell
-commands and persistent terminals before running repository teardown.
+commands and persistent terminals before running repository teardown for dedicated
+workspaces. Existing-working-copy tasks skip location-scoped shell cleanup because
+those commands may belong to unrelated sessions; session-owned persistent terminals
+are still stopped.
 
 Repository-specific work and manual verification:
 

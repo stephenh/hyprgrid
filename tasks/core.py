@@ -88,13 +88,20 @@ class Settings:
     def repositories(self):
         """Discover immediate jj children and collapse symlink/workspace aliases."""
         found = {}
+        for path in self.working_copies():
+            found.setdefault(repo_identity(path), path)
+        return list(found.values())
+
+    def working_copies(self):
+        """Offer each existing checkout, even when several share one jj repository."""
+        found = {}
         for root in self.roots:
             if not root.is_dir():
                 continue
             for child in sorted(root.iterdir()):
                 if (child / ".jj/repo").exists():
                     path = child.resolve()
-                    found.setdefault(repo_identity(path), path)
+                    found.setdefault(path, path)
         return list(found.values())
 
     def hooks(self, repo):
@@ -135,9 +142,12 @@ class OpenCode:
         for session in family:
             self.api("post", f"/api/session/{session}/interrupt?resume=false")
         # Detached shell tools and persistent terminals can outlive a session turn.
-        query = urlencode({"location[directory]": task["path"]})
-        for shell in self.api("get", "/api/shell?" + query)["data"]:
-            self.api("delete", f'/api/shell/{shell["id"]}?' + query)
+        # Shell commands are location-scoped, not session-scoped. A borrowed checkout
+        # can also contain unrelated sessions, so only dedicated checkouts own these.
+        if task.get("checkout_mode") != "existing":
+            query = urlencode({"location[directory]": task["path"]})
+            for shell in self.api("get", "/api/shell?" + query)["data"]:
+                self.api("delete", f'/api/shell/{shell["id"]}?' + query)
         for session in family:
             for terminal in self.api("get", f"/api/experimental/session/{session}/terminal")["data"]:
                 self.api("delete", f'/api/experimental/persistent-pty/{terminal["id"]}')
@@ -192,37 +202,53 @@ class Manager:
         self.agent = agent or OpenCode()
         self.desktop = desktop
 
-    def create(self, repo, name, desktop=False):
-        """Create an isolated working copy from jj's default-branch revset.
+    def create(self, repo, name=None, desktop=False, existing=False, adopt_window=None):
+        """Create an isolated working copy or wrap an existing checkout without owning it.
 
         Publish preparing state first. Failures leave the checkout and diagnostics
-        available to retry with restore or remove with delete.
+        available to retry with restore or remove with delete. Without an explicit
+        name, use the selected working copy's directory name.
         """
+        if adopt_window and (not existing or not desktop or not self.desktop):
+            raise TaskError("Promotion requires an existing working copy and a desktop session")
         repo = Path(repo).expanduser().resolve()
         if not (repo / ".jj/repo").exists():
             raise TaskError(f"Not a jj repository: {repo}")
-        name = task_name(name)
-        base = run(["jj", "--ignore-working-copy", "log", "-r", "trunk()", "--no-graph", "-T", "commit_id"], cwd=repo).strip()
-        if not re.fullmatch(r"[0-9a-f]{40,64}", base):
-            raise TaskError("trunk() must resolve to one default-branch revision")
+        name = task_name(repo.name if name is None else name)
         task_id = uuid.uuid4().hex[:12]
-        repo_label = repo.name
-        if sum(path.name == repo.name for path in self.settings.repositories()) > 1:
-            repo_label = f"{repo.parent.name}-{repo.name}"
-        self.settings.workspaces.mkdir(parents=True, exist_ok=True)
-        path = self.settings.workspaces / f"{slug(repo_label)}-{slug(name)}-{task_id}" / repo.name
+        base = None
+        path = repo
+        if existing:
+            for task in self.store.read().values():
+                if Path(task["path"]).resolve() == repo:
+                    raise TaskError(f'Checkout already belongs to task {task["name"]} ({task["id"]}); open or restore it')
+        else:
+            base = run(["jj", "--ignore-working-copy", "log", "-r", "trunk()", "--no-graph", "-T", "commit_id"], cwd=repo).strip()
+            if not re.fullmatch(r"[0-9a-f]{40,64}", base):
+                raise TaskError("trunk() must resolve to one default-branch revision")
+            repo_label = repo.name
+            if sum(path.name == repo.name for path in self.settings.repositories()) > 1:
+                repo_label = f"{repo.parent.name}-{repo.name}"
+            self.settings.workspaces.mkdir(parents=True, exist_ok=True)
+            path = self.settings.workspaces / f"{slug(repo_label)}-{slug(name)}-{task_id}" / repo.name
         task = {"id": task_id, "name": name, "repo": str(repo), "path": str(path),
-                "workspace": f"hyprgrid-{task_id}", "base": base, "session": None,
+                "checkout_mode": "existing" if existing else "dedicated",
+                "repo_identity": str(repo_identity(repo)),
+                "workspace": None if existing else f"hyprgrid-{task_id}", "base": base, "session": None,
                 "state": "preparing", "activity": "unknown", "snoozed_until": 0,
-                "created": time.time(), "hooks": self.settings.hooks(repo)}
+                "created": time.time(), "hooks": {} if existing else self.settings.hooks(repo)}
         self.store.save(task)
         try:
             if desktop:
-                self.desktop.reserve(task)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            run(["jj", "workspace", "add", "--name", task["workspace"], "-r", base, str(path)], cwd=repo)
-            task["checkout_created"] = True
-            self.store.save(task)
+                if adopt_window:
+                    self.desktop.adopt(task, adopt_window)
+                else:
+                    self.desktop.reserve(task)
+            if not existing:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                run(["jj", "workspace", "add", "--name", task["workspace"], "-r", base, str(path)], cwd=repo)
+                task["checkout_created"] = True
+                self.store.save(task)
             self.prepare(task)
         except Exception as error:
             self.fail(task, "create", error)
@@ -244,13 +270,14 @@ class Manager:
             if desktop:
                 self.desktop.reserve(task)
             if not Path(task["path"]).exists():
-                if task.get("checkout_created"):
+                if task.get("checkout_created") or task.get("checkout_mode") == "existing":
                     raise TaskError("Task checkout is missing; recover it before restoring this task")
                 Path(task["path"]).parent.mkdir(parents=True, exist_ok=True)
                 run(["jj", "workspace", "add", "--name", task["workspace"], "-r", task["base"], task["path"]], cwd=task["repo"])
                 task["checkout_created"] = True
                 self.store.save(task)
-            if repo_identity(Path(task["path"])) != repo_identity(Path(task["repo"])):
+            expected_repo = task.get("repo_identity", str(repo_identity(Path(task["repo"]))))
+            if str(repo_identity(Path(task["path"]))) != expected_repo:
                 raise TaskError("Task checkout no longer belongs to its source repository")
             self.prepare(task)
         except Exception as error:
@@ -290,6 +317,10 @@ class Manager:
 
     def delete(self, task):
         """Remove only a verified dedicated workspace; retain the agent's conversation."""
+        if task.get("checkout_mode") == "existing":
+            self.archive(task)
+            self.store.remove(task["id"])
+            return
         path = Path(task["path"])
         nested = path.name == Path(task["repo"]).name and path.parent.name.endswith("-" + task["id"])
         if path.is_symlink() or (nested and path.parent.is_symlink()) or not (nested or path.name.endswith("-" + task["id"])):
@@ -318,6 +349,9 @@ class Manager:
 
     def hook(self, task, name):
         """Log hook output outside the checkout so failures remain inspectable after cleanup."""
+        # Existing checkouts keep their own environment, including any running services.
+        if task.get("checkout_mode") == "existing":
+            return
         command = task["hooks"][name]
         cwd = Path(task["path"])
         if command == [f"script/{name}"] and not (cwd / command[0]).exists():
@@ -340,8 +374,11 @@ class Manager:
 
 def task_environment(task):
     """Apply task identity to hooks, shells, and the server-side agent environment."""
-    return {**os.environ, "HYPRGRID_TASK_ID": task["id"], "HYPRGRID_REPO": task["repo"],
-            "HYPRGRID_WORKSPACE": task["path"], "COMPOSE_PROJECT_NAME": f'hyprgrid-{task["id"]}'}
+    environment = {**os.environ, "HYPRGRID_TASK_ID": task["id"], "HYPRGRID_REPO": task["repo"],
+                   "HYPRGRID_WORKSPACE": task["path"]}
+    if task.get("checkout_mode") != "existing":
+        environment["COMPOSE_PROJECT_NAME"] = f'hyprgrid-{task["id"]}'
+    return environment
 
 
 def repo_identity(path):

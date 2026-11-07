@@ -135,7 +135,17 @@ return function(options)
       hl.exec_cmd(os.getenv("HOME") .. "/.local/bin/hypr-ws-desc set")
       return
     end
-    hl.exec_cmd(command .. " menu " .. name .. (id and (" --task " .. id) or ""))
+    local target = id and (" --task " .. id) or ""
+    if name == "actions" and letter and not id then
+      -- Bind promotion to this row before a slow menu or another monitor changes focus.
+      for _, window in ipairs(hl.get_windows()) do
+        if window.workspace and window.workspace.name:match("^%d+([a-l])$") == letter then
+          target = " --window " .. window.address
+          break
+        end
+      end
+    end
+    hl.exec_cmd(command .. " menu " .. name .. target)
   end
 
   hl.unbind("SUPER + D") -- replaces the grid's description-only prompt

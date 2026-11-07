@@ -24,8 +24,13 @@ def main():
     auto_archive.add_argument("task")
     new = commands.add_parser("new", help="Create and prepare a jj task")
     new.add_argument("--repo")
-    new.add_argument("--name")
+    new.add_argument("--name", help="Task name; existing copies default to their directory name")
     new.add_argument("--desktop", action="store_true")
+    new.add_argument("--existing", action="store_true", help="Use --repo's existing checkout without setup or checkout cleanup")
+    promote = commands.add_parser("promote", help="Make an existing desktop row a task without moving its windows")
+    promote.add_argument("--repo")
+    promote.add_argument("--name", help="Task name; defaults to the working-copy directory name")
+    promote.add_argument("--row", choices=list("abcdefghijkl"), help="Existing row letter; defaults to the current row")
     for name in ("attach", "open", "shell", "restore", "archive", "delete", "rename", "snooze", "acknowledge"):
         command = commands.add_parser(name)
         command.add_argument("task", nargs="?")
@@ -42,6 +47,7 @@ def main():
     menu = commands.add_parser("menu", help="Omarchy-native task actions")
     menu.add_argument("action", choices=["new", "switch", "snooze", "archive", "restore", "actions", "rename", "browser"])
     menu.add_argument("--task")
+    menu.add_argument("--window", help=argparse.SUPPRESS)
     watch = commands.add_parser("watch", help="Publish OpenCode activity for the bar and pickers")
     watch.add_argument("--once", action="store_true")
     args = parser.parse_args()
@@ -64,18 +70,26 @@ def main():
         elif args.command == "menu":
             if not desktop:
                 raise TaskError("Desktop menus require a Hyprland session; use attach over SSH")
-            desktop_menu(manager, args.action, args.task)
-        elif args.command == "new":
-            repo = args.repo or choose_repo(settings)
-            name = args.name or (text_input("Task name") if repo else None)
-            if repo and name:
-                if args.desktop and not desktop:
+            desktop_menu(manager, args.action, args.task, window=args.window)
+        elif args.command in ("new", "promote"):
+            promoting = args.command == "promote"
+            if promoting and not desktop:
+                raise TaskError("Promotion requires a Hyprland desktop session")
+            window = desktop.promotion_window(args.row) if promoting else None
+            existing = promoting or args.existing
+            on_desktop = promoting or args.desktop
+            repo = args.repo or choose_repo(settings, existing=existing)
+            name = args.name
+            if repo and not existing and not name:
+                name = text_input("Task name")
+            if repo and (existing or name):
+                if on_desktop and not desktop:
                     raise TaskError("--desktop requires a Hyprland session")
                 with store.lock():
-                    task = manager.create(repo, name, args.desktop)
-                    if args.desktop:
+                    task = manager.create(repo, name, on_desktop, existing=existing, adopt_window=window)
+                    if on_desktop and not promoting:
                         desktop.open(task)
-                if not args.desktop:
+                if promoting or not on_desktop:
                     print(task["id"])
         else:
             task_id = args.task or choose_task(store, archived=args.command == "restore")
@@ -132,7 +146,8 @@ def execute_action(manager, action, task_id, args):
             manager.archive(task)
             return
         elif action == "delete":
-            if not args.yes and input(f'Delete {task["name"]} and {task["path"]}? [y/N] ').lower() != "y":
+            target = f'task {task["name"]} (keep {task["path"]})' if task.get("checkout_mode") == "existing" else f'{task["name"]} and {task["path"]}'
+            if not args.yes and input(f'Delete {target}? [y/N] ').lower() != "y":
                 return
             signal.signal(signal.SIGHUP, signal.SIG_IGN)
             manager.delete(task)
@@ -156,9 +171,16 @@ def execute_action(manager, action, task_id, args):
     os.execvpe(command[0], command, env)
 
 
-def desktop_menu(manager, action, task_id):
+def desktop_menu(manager, action, task_id, window=None):
     """Gather input before locking so an abandoned menu never blocks other operations."""
     store = manager.store
+    if action == "actions" and not task_id:
+        window = window or manager.desktop.promotion_window()
+        repo = choose_repo(manager.settings, graphical=True, existing=True)
+        if repo:
+            with store.lock():
+                manager.create(repo, desktop=True, existing=True, adopt_window=window)
+        return
     if action == "browser":
         profile = pick("New browser window", chromium_profiles(), graphical=True)
         if profile is not None:
@@ -167,12 +189,20 @@ def desktop_menu(manager, action, task_id):
                 manager.desktop.open_browser(profile, task)
         return
     if action == "new":
-        repo = choose_repo(manager.settings, graphical=True)
-        name = text_input("Task name", graphical=True) if repo else None
-        if not name:
+        mode = pick("Task checkout", [
+            ("existing", "Existing working copy", "Use current work; leave checkout and services alone"),
+            ("dedicated", "New jj workspace", "Isolated checkout from trunk; run setup and teardown"),
+        ], graphical=True)
+        if not mode:
+            return
+        repo = choose_repo(manager.settings, graphical=True, existing=mode == "existing")
+        if not repo:
+            return
+        name = None if mode == "existing" else text_input("Task name", graphical=True)
+        if mode != "existing" and not name:
             return
         with store.lock():
-            task = manager.create(repo, name, desktop=True)
+            task = manager.create(repo, name, desktop=True, existing=mode == "existing")
             manager.desktop.open(task)
         return
     if action == "switch":
@@ -188,11 +218,12 @@ def desktop_menu(manager, action, task_id):
             raise TaskError("The current row is not a managed task")
         return
     task = store.get(task_id)
+    delete_label = "Delete task (keep working copy)" if task.get("checkout_mode") == "existing" else "Delete task and workspace"
     if action == "actions":
         choices = [(name, label, "") for name, label in (
             ("open", "Open agent"), ("shell", "New terminal"), ("browser", "New browser window"),
             ("zed", "Zed"), ("rename", "Rename"),
-            ("snooze", "Snooze"), ("archive", "Archive"), ("delete", "Delete task and workspace"))]
+            ("snooze", "Snooze"), ("archive", "Archive"), ("delete", delete_label))]
         action = pick(task["name"], choices, graphical=True)
         if not action:
             return
@@ -210,7 +241,7 @@ def desktop_menu(manager, action, task_id):
         if not value:
             return
     elif action == "delete":
-        if pick("Delete task and checkout?", [("no", "Cancel", ""),
+        if pick(delete_label + "?", [("no", "Cancel", ""),
                 ("yes", f'Delete {task["name"]}', task["path"])], graphical=True) != "yes":
             return
     with store.lock():
@@ -254,7 +285,8 @@ def task_choices(store, archived=None):
         status = task["state"] if task["state"] != "active" else task.get("activity", "unknown")
         if task.get("snoozed_until", 0) > time.time():
             status += " · snoozed"
-        subtitle = f'{location} · {Path(task["repo"]).name} · {status} · {task["id"]}'
+        checkout = task["path"] if task.get("checkout_mode") == "existing" else Path(task["repo"]).name
+        subtitle = f'{location} · {checkout} · {status} · {task["id"]}'
         result.append((task["id"], task["name"], subtitle))
     return result
 
@@ -264,10 +296,11 @@ def choose_task(store, graphical=False, archived=False):
     return pick("Archived tasks" if archived else "Tasks", task_choices(store, archived), graphical)
 
 
-def choose_repo(settings, graphical=False):
+def choose_repo(settings, graphical=False, existing=False):
     """Refresh shallow discovery on each invocation."""
-    return pick("Repository", [(str(path), path.name, str(path.parent))
-                               for path in settings.repositories()], graphical)
+    paths = settings.working_copies() if existing else settings.repositories()
+    return pick("Working copy" if existing else "Repository",
+                [(str(path), path.name, str(path.parent)) for path in paths], graphical)
 
 
 def watch_tasks(store, agent, once=False):

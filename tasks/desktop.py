@@ -30,6 +30,27 @@ class Desktop:
         """Allocate without focusing; setup can continue while the user works elsewhere."""
         self.evaluate(f'hyprgrid.reserve({lua_string(task["id"])})')
 
+    def adopt(self, task, address):
+        """Claim the captured window's row without moving, closing, or opening windows."""
+        self.evaluate(f'hyprgrid.adopt({lua_string(task["id"])}, {lua_string(address)})')
+
+    def promotion_window(self, letter=None):
+        """Capture a representative window before prompts can change the focused workspace."""
+        if letter is None:
+            workspace = json.loads(run(["hyprctl", "-j", "activeworkspace"]))
+            match = re.fullmatch(r"\d+([a-l])", workspace["name"])
+            if not match:
+                raise TaskError("Select an existing task row (a–l), not a home workspace")
+            letter = match[1]
+        if not re.fullmatch(r"[a-l]", letter):
+            raise TaskError("Task rows must be a single letter a–l")
+        if ord(letter) - ord("a") + 2 in self.store.rows().values():
+            raise TaskError("Row already belongs to a managed task")
+        for client in json.loads(run(["hyprctl", "-j", "clients"])):
+            if re.fullmatch(r"\d+" + letter, client["workspace"]["name"]):
+                return client["address"]
+        raise TaskError("The selected row has no windows to promote")
+
     def release(self, task):
         """Let the grid compact rows after a successful archive."""
         self.evaluate(f'hyprgrid.release({lua_string(task["id"])})')

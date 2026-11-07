@@ -563,6 +563,29 @@ function hyprgrid.reserve(id)
   error("All 12 task rows are occupied")
 end
 
+-- Claim a populated row without moving windows. A captured window survives focus changes while
+-- prompts are open; a closed window must not let a stale menu claim a reused letter.
+function hyprgrid.adopt(id, address)
+  assert(type(id) == "string" and id:match("^[a-z0-9-]+$"), "Invalid task ID")
+  assert(not hyprgrid.rows[id], "Task already has a desktop row")
+  local row
+  for _, window in ipairs(hl.get_windows()) do
+    if window.address == address then
+      local letter = window.workspace and window.workspace.name:match("^%d+([a-l])$")
+      assert(letter, "Promotion window is no longer in a task row")
+      row = letter:byte() - string.byte("a") + 2
+      break
+    end
+  end
+  assert(row, "Promotion window is missing; reopen the task menu")
+  for _, reserved in pairs(hyprgrid.rows) do
+    assert(reserved ~= row, "Row already belongs to a managed task")
+  end
+  hyprgrid.rows[id] = row
+  hyprgrid.on_rows_changed()
+  return row
+end
+
 -- Retain the reservation until every window has accepted its graceful close request.
 function hyprgrid.release(id)
   local row = hyprgrid.rows[id]

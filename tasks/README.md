@@ -56,11 +56,11 @@ Press and release `Super+T`, then:
 | --- | --- |
 | `a–l` | Jump to that task row, retaining the tool column |
 | `Enter` | Active task picker |
-| `n` | Choose repo, name the task, prepare it, open OpenCode |
+| `n` | Choose existing working copy or new jj workspace, open OpenCode |
 | `s` | Snooze the current task (or unsnooze) |
 | `x` | Archive the current task |
 | `r` | Restore an archived task and open its agent |
-| `Space` | Current-task actions: agent, terminal, rename, snooze, archive, delete |
+| `Space` | Current-task actions, or promote an unmanaged row |
 | `0` | Home row |
 | `Escape` | Cancel |
 
@@ -91,6 +91,59 @@ New task checkouts live at `~/workspaces/<repo>-<task>-<id>/<repo>/`, so termina
 prompts and editor project titles show just the repository name. The parent keeps
 duplicate task names distinct. Existing tasks retain their recorded checkout paths.
 
+### Use an existing working copy
+
+`Super+T → n → Existing working copy` offers checkouts under `~/other` and
+`~/homebound`. The task uses that exact checkout, including its current change and
+uncommitted work. Separate jj working copies of one repository are listed separately;
+symlink aliases are not. Choose **New jj workspace** for the original isolated workflow.
+
+Existing-working-copy tasks automatically use the selected directory's name, without
+a name prompt: `~/homebound/graphql-service-2` becomes `graphql-service-2`. This also
+applies to promotions. Use `Super+D` or the task's **Rename** action to change it later;
+CLI creation accepts an explicit `--name` override. New dedicated jj workspaces still
+prompt for a task name.
+
+Existing-working-copy tasks get the same row, terminals, editor, snooze, and resumable
+OpenCode conversation, but **do not own the checkout or its environment**:
+
+- Create and restore do not run setup hooks or change the jj revision.
+- Compose uses the normal checkout/inherited project settings, not a task project name.
+- Archive stops the managed agent and closes the task's row windows, but skips teardown.
+- Delete forgets the task record, never the directory or jj workspace. Conversation history stays.
+- Restore reuses the same path; a missing checkout must be recovered manually.
+
+Only one task can register a given working-copy path, including archived tasks. Open
+or restore that task instead of creating a duplicate. Other OpenCode sessions in the
+same checkout are not adopted or interrupted. Location-scoped detached shell commands
+cannot be attributed to a session, so existing-working-copy tasks leave those alone
+on archive; their session-owned persistent terminals are still stopped.
+
+### Promote an existing row
+
+Already working in an unmanaged row such as `2b`? Press **Super+T → Space** to go
+straight to choosing the existing working copy. Its directory name becomes the task
+name. There is no separate promotion action or name prompt; canceling the checkout
+picker leaves the row unmanaged. All cells
+with that letter (`1b`, `2b`, `3b`, etc.) become one managed task **in place**. Their
+windows, row letter, monitor placement, and focus stay unchanged; no new agent window
+is opened. **Open agent** in the task-actions menu opens the task's saved conversation
+when wanted. Existing agent conversations are not automatically adopted.
+
+Promotion uses existing-working-copy mode: no setup/teardown or checkout removal.
+Existing shells and editor projects are not reconfigured; the selected checkout is
+used for new managed terminals, editor windows, and the managed agent. From promotion
+onward, normal task lifecycle applies to the whole row, including closing its windows
+on archive/delete and auto-archiving after its final window closes.
+
+Supported task rows are `a–l`; home/root workspaces are not promoted. On an already
+managed row, `Super+T → Space` continues to open the normal task-actions menu.
+
+The menu captures a representative window before prompting, then the compositor
+checks its row is still unmanaged when registration completes. A closed window or a
+row already claimed by another task is rejected rather than stealing a row. Promotion
+does not merge different letters into one task.
+
 `Super+T → Space → Zed` opens a new Zed window on the current workspace, with
 the task checkout as its working directory and project. It uses `zeditor` on Arch,
 or `zed` if that is the installed command.
@@ -107,6 +160,8 @@ hyprgrid-task list
 hyprgrid-task attach                 # numbered terminal picker
 hyprgrid-task attach <task-id>       # same saved OpenCode conversation
 hyprgrid-task new --repo ~/other/hyprgrid --name 'Task picker'
+hyprgrid-task new --existing --repo ~/other/hyprgrid  # task name: hyprgrid
+hyprgrid-task promote --row b --repo ~/homebound/example  # task name: example
 hyprgrid-task restore <task-id>      # setup, no desktop row or window
 hyprgrid-task shell <task-id>        # shell with the task's Compose environment
 ```
@@ -116,8 +171,11 @@ task when given its ID. The SSH TUI connects to the desktop's shared OpenCode se
 closing the client is not archive. The task manager never stops that shared service.
 Interactive disconnect behavior still needs a user smoke test with the installed TUI.
 
+`promote` requires compositor access and prints the new task ID without opening a
+window. Omit `--row` to use the current desktop row. It is not an SSH attachment command.
+
 Use `open <id>` or `restore <id> --desktop` locally to show a task on the desktop.
-`archive <id>` runs teardown; `delete <id>` also forgets/removes the dedicated jj
+For dedicated-workspace tasks, `archive <id>` runs teardown; `delete <id>` also forgets/removes the dedicated jj
 workspace, with a confirmation (`--yes` for explicit noninteractive use). Agent
 conversation history is retained. `rename <id> --name NAME` and
 `snooze <id> --minutes 60` work from either UI; zero minutes clears snooze.
@@ -127,13 +185,13 @@ task that still owns a desktop row from the desktop, where its windows can be cl
 
 ## Repository convention
 
-Repositories are discovered immediately below `~/other` and `~/homebound`. Creation
+Repositories are discovered immediately below `~/other` and `~/homebound`. New-workspace creation
 uses jj's `trunk()` revset (its default-branch convention) at the locally known
 revision, not the source checkout's current change. It does not fetch automatically.
 If jj cannot resolve one trunk revision, creation fails before making a workspace;
 configure the repository's `trunk()` alias/default remote rather than guessing `main`.
 
-Add executable `script/setup` and `script/teardown` to the default branch. Both run
+For dedicated-workspace tasks, add executable `script/setup` and `script/teardown` to the default branch. Both run
 from the task checkout with:
 
 ```text

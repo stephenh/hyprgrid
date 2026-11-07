@@ -1,8 +1,10 @@
 """Exercise lifecycle boundaries with real jj workspaces and real repository hooks."""
 
 import json
+from contextlib import redirect_stdout
 import ctypes
 import ctypes.util
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -12,8 +14,9 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tasks"))
-from core import Manager, Settings, Store, TaskError, task_environment
+from core import Manager, OpenCode, Settings, Store, TaskError, task_environment
 from desktop import Desktop, chromium_profiles, lua_string, menu_rows, task_terminal_command, task_terminal_launch, task_app_id
+from cli import desktop_menu, main
 
 
 class SessionService:
@@ -50,6 +53,55 @@ class DesktopState:
         if self.windows:
             raise TaskError("Task still has open windows")
         (self.store.path / "rows.tsv").write_text("")
+
+
+class ShellService(OpenCode):
+    """Keep location-scoped shell state behind the real agent interruption code."""
+
+    def __init__(self):
+        self.shells = [{"id": "existing-shell"}]
+
+    def api(self, method, path, body=None, cwd=None):
+        """Expose only the API resources used while stopping this test's session."""
+        if method == "get" and path.startswith("/api/shell?"):
+            return {"data": list(self.shells)}
+        if method == "delete" and path.startswith("/api/shell/existing-shell?"):
+            self.shells.clear()
+            return None
+        if method == "get" and (path.startswith("/api/session?") or path.endswith("/terminal") or path == "/api/session/active"):
+            return {"data": []}
+        if method == "post" and path.endswith("/interrupt?resume=false"):
+            return None
+        raise AssertionError(f"Unexpected API request: {method} {path}")
+
+
+class PromotionDesktop:
+    """Keep a promoted row in the same coordinator snapshot as the compositor."""
+
+    def __init__(self, store):
+        self.store = store
+
+    def adopt(self, task, address):
+        """Associate the test's existing row without launching or moving windows."""
+        if address != "0x123":
+            raise TaskError("Promotion window is missing")
+        (self.store.path / "rows.tsv").write_text(task["id"] + "\t4\n")
+
+    def promotion_window(self, letter=None):
+        """Resolve the test's existing row before any menu input."""
+        if letter != "c":
+            raise TaskError("Expected promotion of row c")
+        return "0x123"
+
+
+class TaskLauncher:
+    """Keep task-creation menu tests from launching windows or touching the compositor."""
+
+    def open(self, task):
+        """No windows are launched by this menu test."""
+
+    def reserve(self, task):
+        """No compositor row is allocated by this menu test."""
 
 
 class TaskWorkspacesTest(unittest.TestCase):
@@ -362,6 +414,329 @@ class TaskWorkspacesTest(unittest.TestCase):
                                     capture_output=True, text=True, check=True)
         # Then only terminal options are supplied, allowing its configured shell to start.
         self.assertEqual(json.loads(result.stdout), ["--app-id=org.hyprgrid.taskabc123", f'--dir={task["path"]}'])
+
+    def test_existing_task_uses_the_original_working_copy(self):
+        # Given unfinished work in an existing checkout.
+        (self.repo / "source-only").write_text("unfinished")
+        # When creating a task around that checkout.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        # Then the task uses that exact working copy.
+        self.assertEqual(Path(task["path"]), self.repo)
+
+    def test_existing_task_does_not_create_a_jj_workspace(self):
+        # Given an existing checkout.
+        # When creating a task around it.
+        self.manager.create(self.repo, "Existing work", existing=True)
+        # Then jj still has only the original workspace.
+        self.assertEqual(self.command("jj", "workspace", "list", "-T", 'name ++ "\\n"'), "default")
+
+    def test_existing_task_does_not_require_trunk(self):
+        # Given a checkout without a resolvable default branch.
+        self.command("jj", "config", "set", "--repo", 'revset-aliases."trunk()"', "missing_branch")
+        # When creating a task around its current work.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        # Then it becomes active without resolving trunk().
+        self.assertEqual(task["state"], "active")
+
+    def test_existing_task_skips_setup(self):
+        # Given a checkout with a setup hook that would create a service.
+        # When creating a task around it.
+        self.manager.create(self.repo, "Existing work", existing=True)
+        # Then the hook has not started a new environment.
+        self.assertFalse((self.repo / "service").exists())
+
+    def test_existing_task_archive_keeps_services(self):
+        # Given a checkout with an already-running service.
+        (self.repo / "service").write_text("existing service")
+        # And a task around that checkout.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        # When archiving the task.
+        self.manager.archive(task)
+        # Then teardown has not removed the existing service.
+        self.assertEqual((self.repo / "service").read_text(), "existing service")
+
+    def test_existing_task_preserves_inherited_compose_project(self):
+        # Given an existing checkout using its normal Compose project name.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        # And an explicit project inherited from the user's environment.
+        with patch.dict(os.environ, {"COMPOSE_PROJECT_NAME": "existing-project"}):
+            # When preparing a task terminal's environment.
+            environment = task_environment(task)
+        # Then the project name is not replaced with a task-owned project.
+        self.assertEqual(environment["COMPOSE_PROJECT_NAME"], "existing-project")
+
+    def test_existing_task_does_not_inject_a_compose_project(self):
+        # Given an existing-checkout task without an explicit Compose project name.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        # When preparing its environment with no inherited project name.
+        with patch.dict(os.environ, {}, clear=True):
+            environment = task_environment(task)
+        # Then Compose can use the checkout's normal project selection.
+        self.assertNotIn("COMPOSE_PROJECT_NAME", environment)
+
+    def test_existing_task_delete_preserves_uncommitted_work(self):
+        # Given unfinished work in a task's borrowed checkout.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        (self.repo / "source-only").write_text("unfinished")
+        # When deleting the task.
+        self.manager.delete(task)
+        # Then the checkout and its unfinished work remain intact.
+        self.assertEqual((self.repo / "source-only").read_text(), "unfinished")
+
+    def test_existing_task_delete_preserves_jj_workspace(self):
+        # Given a task using an existing jj workspace.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        # When deleting the task.
+        self.manager.delete(task)
+        # Then the original jj workspace remains registered.
+        self.assertEqual(self.command("jj", "workspace", "list", "-T", 'name ++ "\\n"'), "default")
+
+    def test_existing_task_delete_removes_its_record(self):
+        # Given a task around an existing checkout.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        # When deleting the task.
+        self.manager.delete(task)
+        # Then the task is no longer registered.
+        self.assertEqual(self.store.read(), {})
+
+    def test_existing_task_restore_reuses_the_conversation(self):
+        # Given an archived existing-checkout task.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        session = task["session"]
+        self.manager.archive(task)
+        # When restoring the saved record.
+        self.manager.restore(self.store.get(task["id"]))
+        # Then it keeps the same conversation.
+        self.assertEqual(self.store.get(task["id"])["session"], session)
+
+    def test_existing_task_restore_skips_setup(self):
+        # Given an archived existing-checkout task with setup available.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        self.manager.archive(task)
+        # When restoring it.
+        self.manager.restore(task)
+        # Then the user's environment is not prepared again.
+        self.assertFalse((self.repo / "service").exists())
+
+    def test_existing_task_restore_does_not_recreate_a_missing_checkout(self):
+        # Given an archived task whose checkout was moved outside the manager.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        self.manager.archive(task)
+        self.repo.rename(self.repo.with_name("moved"))
+        # When restoring it.
+        # Then it reports the missing checkout rather than creating a replacement.
+        with self.assertRaisesRegex(TaskError, "missing"):
+            self.manager.restore(task)
+
+    def test_existing_task_rejects_an_already_registered_checkout_alias(self):
+        # Given an archived task around a checkout.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        self.manager.archive(task)
+        # And another path to the same working copy.
+        alias = self.root / "other/alias"
+        alias.symlink_to(self.repo)
+        # When trying to register it again.
+        # Then the user is directed to reuse the existing task.
+        with self.assertRaisesRegex(TaskError, "already.*task"):
+            self.manager.create(alias, "Duplicate", existing=True)
+
+    def test_working_copy_discovery_keeps_distinct_jj_workspaces(self):
+        # Given another existing working copy of the same repository.
+        other = self.root / "homebound/other-copy"
+        other.parent.mkdir()
+        self.command("jj", "workspace", "add", "--name", "other", str(other))
+        # And an alias to the original checkout.
+        (self.root / "other/alias").symlink_to(self.repo)
+        # When discovering existing working copies.
+        copies = self.settings.working_copies()
+        # Then both distinct copies are selectable, but the alias is not duplicated.
+        self.assertEqual(copies, [self.repo, other])
+
+    def test_existing_task_cli_flag(self):
+        # Given isolated state and an in-memory session service.
+        with patch.dict(os.environ, {"HYPRGRID_STATE_DIR": str(self.store.path)}), \
+                patch("core.OpenCode", return_value=self.agent), \
+                patch("sys.argv", ["hyprgrid-task", "new", "--existing", "--repo", str(self.repo), "--name", "Existing work"]), \
+                redirect_stdout(io.StringIO()):
+            # When creating an existing-checkout task through the CLI.
+            result = main()
+        # Then the command accepts the mode and completes.
+        self.assertEqual(result, 0)
+
+    def test_desktop_new_task_offers_existing_working_copy(self):
+        # Given a desktop task-creation menu selecting existing work and then its checkout.
+        self.manager.desktop = TaskLauncher()
+        with patch("cli.pick", side_effect=["existing", str(self.repo)]), \
+                patch("cli.text_input", side_effect=AssertionError("Existing copies do not need a name prompt")):
+            # When completing the desktop creation flow.
+            desktop_menu(self.manager, "new", None)
+        # Then the created task uses the selected checkout, not a new workspace.
+        self.assertEqual([task["path"] for task in self.store.read().values()], [str(self.repo)])
+
+    def test_existing_task_interrupt_preserves_location_scoped_shells(self):
+        # Given an existing-checkout task sharing its location with another session's shell.
+        task = self.manager.create(self.repo, "Existing work", existing=True)
+        service = ShellService()
+        # When interrupting the task's agent session.
+        service.interrupt(task)
+        # Then the unrelated location-scoped shell survives.
+        self.assertEqual(service.shells, [{"id": "existing-shell"}])
+
+    def test_legacy_dedicated_task_interrupt_still_cleans_up_shells(self):
+        # Given a dedicated task saved before checkout modes were introduced.
+        task = self.manager.create(self.repo, "Dedicated work")
+        del task["checkout_mode"]
+        # And a detached shell in its task-owned location.
+        service = ShellService()
+        # When interrupting the task's agent session.
+        service.interrupt(task)
+        # Then the task-owned shell is removed as before.
+        self.assertEqual(service.shells, [])
+
+    def test_legacy_dedicated_task_delete_still_removes_checkout(self):
+        # Given a dedicated task saved before checkout modes were introduced.
+        task = self.manager.create(self.repo, "Dedicated work")
+        del task["checkout_mode"]
+        del task["repo_identity"]
+        self.store.save(task)
+        # When deleting its saved record.
+        self.manager.delete(self.store.get(task["id"]))
+        # Then its dedicated checkout is removed as before.
+        self.assertFalse(Path(task["path"]).exists())
+
+    def test_promotion_registers_the_existing_row(self):
+        # Given an unmanaged desktop row and an existing checkout.
+        self.manager.desktop = PromotionDesktop(self.store)
+        # When creating a managed task from that row.
+        task = self.manager.create(self.repo, "Promoted work", desktop=True, existing=True, adopt_window="0x123")
+        # Then the task claims the existing row rather than reserving a new one.
+        self.assertEqual(self.store.rows(), {task["id"]: 4})
+
+    def test_promotion_requires_existing_checkout_mode(self):
+        # Given an unmanaged desktop row.
+        self.manager.desktop = PromotionDesktop(self.store)
+        # When trying to promote it with a new dedicated checkout.
+        # Then the existing work is not silently redirected to a different working copy.
+        with self.assertRaisesRegex(TaskError, "existing"):
+            self.manager.create(self.repo, "Promoted work", desktop=True, adopt_window="0x123")
+
+    def test_desktop_actions_promote_an_unmanaged_row_without_opening_a_new_agent(self):
+        # Given an unmanaged row captured before opening its task-actions menu.
+        self.manager.desktop = PromotionDesktop(self.store)
+        # And a user choosing only the existing checkout, with no separate promotion step.
+        with patch("cli.pick", side_effect=[str(self.repo)]), \
+                patch("cli.text_input", side_effect=AssertionError("Promotion does not need a name prompt")):
+            # When completing the task-actions flow.
+            desktop_menu(self.manager, "actions", None, window="0x123")
+        # Then the managed task stays associated with the captured row.
+        task = next(iter(self.store.read().values()))
+        self.assertEqual(self.store.rows(), {task["id"]: 4})
+
+    def test_promotion_row_selection_captures_a_window_not_focus(self):
+        # Given a terminal in the requested row and other windows elsewhere.
+        clients = [
+            {"address": "0x456", "workspace": {"name": "2a"}},
+            {"address": "0x123", "workspace": {"name": "3c"}},
+        ]
+        # When resolving row c before any prompts open.
+        with patch("desktop.run", return_value=json.dumps(clients)):
+            address = Desktop(self.store, "hyprgrid-task").promotion_window("c")
+        # Then promotion will identify a window from the selected row.
+        self.assertEqual(address, "0x123")
+
+    def test_promotion_cli_registers_the_selected_row(self):
+        # Given a desktop row and isolated CLI state.
+        desktop = PromotionDesktop(self.store)
+        with patch.dict(os.environ, {"HYPRGRID_STATE_DIR": str(self.store.path), "HYPRLAND_INSTANCE_SIGNATURE": "test"}), \
+                patch("cli.Desktop", return_value=desktop), \
+                patch("core.OpenCode", return_value=self.agent), \
+                patch("sys.argv", ["hyprgrid-task", "promote", "--row", "c", "--repo", str(self.repo), "--name", "Promoted work"]), \
+                redirect_stdout(io.StringIO()):
+            # When promoting through the CLI.
+            main()
+        # Then the selected row is assigned to the new task.
+        task = next(iter(self.store.read().values()))
+        self.assertEqual(self.store.rows(), {task["id"]: 4})
+
+    def test_automatic_promotion_can_cancel_the_checkout_picker(self):
+        # Given an unmanaged row and a canceled checkout picker.
+        self.manager.desktop = PromotionDesktop(self.store)
+        with patch("cli.pick", return_value=None):
+            # When opening its task actions.
+            desktop_menu(self.manager, "actions", None, window="0x123")
+        # Then the row has not become a managed task.
+        self.assertEqual(self.store.read(), {})
+
+    def test_managed_row_actions_still_offer_rename(self):
+        # Given an existing managed task.
+        task = self.manager.create(self.repo, "Original name", existing=True)
+        # And a user choosing rename from its normal actions menu.
+        with patch("cli.pick", return_value="rename"), \
+                patch("cli.text_input", return_value="Renamed task"):
+            # When opening task actions for the managed row.
+            desktop_menu(self.manager, "actions", task["id"])
+        # Then its normal rename action still works, without promotion prompts.
+        self.assertEqual(self.store.get(task["id"])["name"], "Renamed task")
+
+    def test_default_task_name_uses_the_working_copy_directory_not_the_source_repo(self):
+        # Given a second working copy with a different directory name from its source repository.
+        checkout = self.root / "homebound/graphql-service-2"
+        checkout.parent.mkdir()
+        self.command("jj", "workspace", "add", "--name", "second", str(checkout))
+        # When registering it without an explicit name.
+        task = self.manager.create(checkout, existing=True)
+        # Then its task name matches the selected working copy's directory.
+        self.assertEqual(task["name"], "graphql-service-2")
+
+    def test_default_task_name_can_be_overridden(self):
+        # Given a working copy and an explicit task name.
+        # When registering it with that name.
+        task = self.manager.create(self.repo, "Custom task name", existing=True)
+        # Then the explicit name is kept instead of the directory name.
+        self.assertEqual(task["name"], "Custom task name")
+
+    def test_desktop_existing_copy_defaults_its_task_name(self):
+        # Given an existing checkout selected in the new-task menu.
+        self.manager.desktop = TaskLauncher()
+        with patch("cli.pick", side_effect=["existing", str(self.repo)]), \
+                patch("cli.text_input", side_effect=AssertionError("Unexpected name prompt")):
+            # When creating the task without another prompt.
+            desktop_menu(self.manager, "new", None)
+        # Then the saved task uses the checkout directory name.
+        self.assertEqual(next(iter(self.store.read().values()))["name"], self.repo.name)
+
+    def test_desktop_promotion_defaults_its_task_name(self):
+        # Given an unmanaged row and a selected checkout.
+        self.manager.desktop = PromotionDesktop(self.store)
+        with patch("cli.pick", return_value=str(self.repo)), \
+                patch("cli.text_input", side_effect=AssertionError("Unexpected name prompt")):
+            # When promoting the row without another prompt.
+            desktop_menu(self.manager, "actions", None, window="0x123")
+        # Then the saved task uses the checkout directory name.
+        self.assertEqual(next(iter(self.store.read().values()))["name"], self.repo.name)
+
+    def test_existing_copy_cli_defaults_its_task_name(self):
+        # Given isolated CLI state and no explicit --name.
+        with patch.dict(os.environ, {"HYPRGRID_STATE_DIR": str(self.store.path)}), \
+                patch("core.OpenCode", return_value=self.agent), \
+                patch("sys.argv", ["hyprgrid-task", "new", "--existing", "--repo", str(self.repo)]), \
+                patch("cli.text_input", side_effect=AssertionError("Unexpected name prompt")), \
+                redirect_stdout(io.StringIO()):
+            # When creating a task around an existing checkout.
+            main()
+        # Then the saved task uses the checkout directory name.
+        self.assertEqual(next(iter(self.store.read().values()))["name"], self.repo.name)
+
+    def test_new_dedicated_workspace_still_uses_its_entered_task_name(self):
+        # Given a new dedicated workspace selected in the task-creation menu.
+        self.manager.desktop = TaskLauncher()
+        # And an explicitly entered task name.
+        with patch("cli.pick", side_effect=["dedicated", str(self.repo)]), \
+                patch("cli.text_input", return_value="Invoice rounding"):
+            # When creating its isolated workspace.
+            desktop_menu(self.manager, "new", None)
+        # Then the dedicated task keeps its entered name.
+        self.assertEqual(next(iter(self.store.read().values()))["name"], "Invoice rounding")
 
 
 if __name__ == "__main__":
