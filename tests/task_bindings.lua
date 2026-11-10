@@ -313,17 +313,18 @@ H.scenario("promotion does not turn a home workspace into a task", function()
   H.eq(success, false)
 end)
 
-H.scenario("unmanaged row actions capture a window before launching the menu", function()
+H.scenario("newly promoted row actions use its task ID before background registration finishes", function()
   -- Given focus on an unmanaged row's terminal workspace.
   H.boot()
   loadfile("task-workspaces.lua")()({ path = false })
-  local window = Stub.seed_window("2b", "DP-2")
+  Stub.seed_window("2b", "DP-2")
   H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2b" }))
   -- When opening task actions.
   H.press("SUPER + T")
   H.press("space")
-  -- Then the menu can identify that row even if focus changes during the prompts.
-  H.eq(Stub.S().log[#Stub.S().log], "exec:hyprgrid-task menu actions --window " .. window)
+  -- Then actions address the ID assigned by the prefix, without waiting for Python.
+  local id = next(hyprgrid.rows)
+  H.eq(Stub.S().log[#Stub.S().log], "exec:hyprgrid-task menu actions --task " .. tostring(id))
 end)
 
 H.scenario("promotion persists the existing letter across reload", function()
@@ -351,4 +352,269 @@ H.scenario("promotion does not focus the promoted row", function()
   hyprgrid.adopt("promoted", window)
   -- Then focus remains where the user left it.
   H.expect_focused("DP-1")
+end)
+
+H.scenario("Super+T promotes the current row while entering the submap", function()
+  -- Given an unmanaged terminal workspace.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2b", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2b" }))
+  -- When entering task mode.
+  H.press("SUPER + T")
+  -- Then its row is immediately assigned a task identity.
+  H.eq(select(2, next(hyprgrid.rows)), 3)
+end)
+
+H.scenario("automatic promotion still leaves the task submap active", function()
+  -- Given an unmanaged grid workspace.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1a" }))
+  -- When entering task mode.
+  H.press("SUPER + T")
+  -- Then the next key still selects a task action.
+  H.eq(Stub.S().submap, "hyprgrid-tasks")
+end)
+
+H.scenario("automatic promotion also supports an empty active grid workspace", function()
+  -- Given an empty grid cell with no representative window.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2c" }))
+  -- When entering task mode.
+  H.press("SUPER + T")
+  -- Then that row is still registered in place.
+  H.eq(select(2, next(hyprgrid.rows)), 4)
+end)
+
+H.scenario("repeated task prefixes preserve the same task identity", function()
+  -- Given a row promoted by the task prefix.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2b", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2b" }))
+  H.press("SUPER + T")
+  local id = next(hyprgrid.rows)
+  -- When canceling task mode and entering it again.
+  H.press("Escape")
+  H.press("SUPER + T")
+  -- Then the original ID still owns the row.
+  H.eq(hyprgrid.rows[id or "missing"], 3)
+end)
+
+H.scenario("entering task mode at home does not promote a home workspace", function()
+  -- Given focus on the home row.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  -- When entering task mode.
+  H.press("SUPER + T")
+  -- Then no task is created.
+  H.eq(next(hyprgrid.rows), nil)
+end)
+
+H.scenario("automatic promotion queues metadata without opening a menu or an agent", function()
+  -- Given an unmanaged row with existing windows.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2b", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2b" }))
+  -- When entering task mode.
+  H.press("SUPER + T")
+  -- Then only the row's background metadata command is launched.
+  H.eq(Stub.S().log[#Stub.S().log], "exec:hyprgrid-task ensure-task " .. tostring(next(hyprgrid.rows)))
+end)
+
+H.scenario("organize packs sparse i and j rows into a and b", function()
+  -- Given two surviving rows with gaps before them.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2i", "DP-2")
+  Stub.seed_window("2j", "DP-2")
+  -- When explicitly organizing the grid.
+  hyprgrid.organize()
+  -- Then the surviving rows are consecutive and keep their original order.
+  H.expect_column_tags("2", { "a", "b" })
+end)
+
+H.scenario("organize keeps managed identity while renumbering its row", function()
+  -- Given two managed rows with windows in different columns.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  hyprgrid.claim("first", "i")
+  hyprgrid.claim("second", "j")
+  Stub.seed_window("1i", "DP-1")
+  Stub.seed_window("2j", "DP-2")
+  -- When organizing all columns together.
+  hyprgrid.organize()
+  -- Then the second task keeps its identity at b.
+  H.eq(hyprgrid.rows.second, 3)
+end)
+
+H.scenario("organize follows the viewed task to its new letter", function()
+  -- Given focus on the later sparse row.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2i", "DP-2")
+  Stub.seed_window("2j", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2j" }))
+  -- When organizing the grid.
+  hyprgrid.organize()
+  -- Then the same task remains visible under its new letter.
+  H.expect_active("DP-2", "2b")
+end)
+
+H.scenario("organize does not duplicate the active workspace name", function()
+  -- Given a sparse row visible while lower letters are empty.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2i", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2i" }))
+  -- When organizing the viewed workspace.
+  hyprgrid.organize()
+  -- Then parking and renaming never leave duplicate names.
+  H.expect_no_duplicates()
+end)
+
+H.scenario("organize preserves other monitors' viewed tasks when invoked from home", function()
+  -- Given different task rows visible on two monitors, with focus on a third monitor's home.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("1i", "DP-1")
+  Stub.seed_window("2j", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1i" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2j" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "3" }))
+  -- When organizing from home.
+  hyprgrid.organize()
+  -- Then the second monitor follows its own viewed task, rather than being sent home.
+  H.expect_active("DP-2", "2b")
+end)
+
+H.scenario("organize keeps focus on the original home workspace", function()
+  -- Given a task visible elsewhere while the home workspace is focused.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2i", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2i" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "3" }))
+  -- When organizing.
+  hyprgrid.organize()
+  -- Then focus stays on the home monitor.
+  H.expect_focused("HDMI-A-1")
+end)
+
+H.scenario("organize preserves empty managed task reservations", function()
+  -- Given a task without windows before another task's terminal.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  hyprgrid.claim("empty", "i")
+  Stub.seed_window("2j", "DP-2")
+  -- When organizing the grid.
+  hyprgrid.organize()
+  -- Then the empty task still owns a row instead of being discarded.
+  H.eq(hyprgrid.rows.empty, 2)
+end)
+
+H.scenario("organize does not turn automatic compaction back on", function()
+  -- Given a manually organized grid.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  local first = Stub.seed_window("2i", "DP-2")
+  Stub.seed_window("2j", "DP-2")
+  hyprgrid.organize()
+  -- When a lower row subsequently closes.
+  H.close(first)
+  H.timers()
+  -- Then the remaining row keeps its new letter until another explicit organize.
+  H.expect_windows("2b", 1)
+end)
+
+H.scenario("organize carries unmanaged descriptions to the new letters", function()
+  -- Given descriptions for two sparse rows.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2i", "DP-2")
+  Stub.seed_window("2j", "DP-2")
+  H.set_desc("i", "Invoices")
+  H.set_desc("j", "Reports")
+  -- When organizing them.
+  hyprgrid.organize()
+  -- Then the later row's description follows it to b.
+  H.eq(H.desc("b"), "Reports")
+end)
+
+H.scenario("organize retains descriptions for rows that do not move", function()
+  -- Given a row already at a and another row separated by gaps.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2a", "DP-2")
+  Stub.seed_window("2i", "DP-2")
+  H.set_desc("a", "Invoices")
+  H.set_desc("i", "Reports")
+  -- When rebuilding the description map during organize.
+  hyprgrid.organize()
+  -- Then the unchanged row's description is not lost.
+  H.eq(H.desc("a"), "Invoices")
+end)
+
+H.scenario("a pending Zed launch follows its task through organize", function()
+  -- Given an editor launch captured before its row is renumbered.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  hyprgrid.claim("editor", "i")
+  Stub.seed_window("2i", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2i" }))
+  hyprgrid.prepare_zed("editor", "repo")
+  -- When organizing before Zed maps on another workspace.
+  hyprgrid.organize()
+  H.open("1", "dev.zed.Zed", "repo")
+  H.timers()
+  -- Then the editor reaches its original task under the new letter.
+  H.expect_windows("2a", 2)
+end)
+
+H.scenario("Super+T o exits the submap and requests organization", function()
+  -- Given the task prefix.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  H.press("SUPER + T")
+  -- When selecting organize.
+  H.press("o")
+  -- Then the coordinator serializes it with task lifecycle operations.
+  H.eq(Stub.S().log[#Stub.S().log], "exec:hyprgrid-task organize")
+end)
+
+H.scenario("organized task letters persist across adapter reloads", function()
+  -- Given a sparse managed task and a persistent assignment file.
+  local path = os.tmpname()
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = path })
+  hyprgrid.claim("survivor", "i")
+  Stub.seed_window("2i", "DP-2")
+  -- When organizing and reloading the adapter.
+  hyprgrid.organize()
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = path })
+  os.remove(path)
+  -- Then the same task retains its new letter a.
+  H.eq(hyprgrid.rows.survivor, 2)
+end)
+
+H.scenario("a queued close event cannot override organize's restored task", function()
+  -- Given a close event still queued for a sparse row that has just emptied.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  local closed = Stub.seed_window("2h", "DP-2")
+  Stub.seed_window("2i", "DP-2")
+  Stub.seed_window("2j", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2h" }))
+  H.close(closed)
+  -- And the user now viewing i before that deferred callback runs.
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2i" }))
+  -- When organizing and then processing the old close callback.
+  hyprgrid.organize()
+  H.timers()
+  -- Then the selected task stays visible, rather than following the obsolete h cell.
+  H.expect_active("DP-2", "2a")
 end)

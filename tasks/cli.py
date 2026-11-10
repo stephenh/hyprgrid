@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 
-from core import Manager, OpenCode, Settings, Store, TaskError, task_environment, task_name
+from core import Manager, OpenCode, Settings, Store, TaskError, owns_checkout, require_checkout, task_directory, task_environment, task_name
 from desktop import Desktop, chromium_profiles, pick, text_input
 
 
@@ -20,8 +20,11 @@ def main():
     listing = commands.add_parser("list", help="List tasks (including archived tasks)")
     listing.add_argument("--json", action="store_true")
     commands.add_parser("repos", help="List discovered jj repositories")
+    commands.add_parser("organize", help="Close gaps and renumber desktop task rows in their current order")
     auto_archive = commands.add_parser("archive-empty", help="Archive a desktop task if its row is empty")
     auto_archive.add_argument("task")
+    ensure = commands.add_parser("ensure-task", help="Publish metadata for a compositor-assigned task")
+    ensure.add_argument("task")
     new = commands.add_parser("new", help="Create and prepare a jj task")
     new.add_argument("--repo")
     new.add_argument("--name", help="Task name; existing copies default to their directory name")
@@ -31,7 +34,7 @@ def main():
     promote.add_argument("--repo")
     promote.add_argument("--name", help="Task name; defaults to the working-copy directory name")
     promote.add_argument("--row", choices=list("abcdefghijkl"), help="Existing row letter; defaults to the current row")
-    for name in ("attach", "open", "shell", "restore", "archive", "delete", "rename", "snooze", "acknowledge"):
+    for name in ("attach", "open", "shell", "restore", "archive", "delete", "rename", "snooze", "acknowledge", "set-checkout"):
         command = commands.add_parser(name)
         command.add_argument("task", nargs="?")
         if name in ("attach", "shell"):
@@ -44,6 +47,8 @@ def main():
             command.add_argument("--name")
         if name == "delete":
             command.add_argument("--yes", action="store_true")
+        if name == "set-checkout":
+            command.add_argument("--repo", required=True)
     menu = commands.add_parser("menu", help="Omarchy-native task actions")
     menu.add_argument("action", choices=["new", "switch", "snooze", "archive", "restore", "actions", "rename", "browser"])
     menu.add_argument("--task")
@@ -59,6 +64,14 @@ def main():
     try:
         if args.command == "watch":
             watch_tasks(store, manager.agent, args.once)
+        elif args.command == "organize":
+            with store.lock():
+                manager.organize()
+        elif args.command == "ensure-task":
+            with store.lock():
+                # A fast archive/delete can release the row before this queued prefix runs.
+                if args.task in store.rows():
+                    manager.ensure_task(args.task)
         elif args.command == "repos":
             print("\n".join(map(str, settings.repositories())))
         elif args.command == "list":
@@ -97,7 +110,7 @@ def main():
                 execute_action(manager, args.command, task_id, args)
     except (TaskError, OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"hyprgrid-task: {error}", file=sys.stderr)
-        if args.command in ("menu", "archive-empty"):
+        if args.command in ("menu", "archive-empty", "ensure-task", "organize"):
             notify("Task operation failed", str(error))
         return 1
     except (KeyboardInterrupt, EOFError):
@@ -110,9 +123,9 @@ def execute_action(manager, action, task_id, args):
     store = manager.store
     with store.lock():
         # A queued close event can arrive after an explicit delete completed.
-        if action == "archive-empty" and task_id not in store.read():
+        if action == "archive-empty" and task_id not in store.read() and task_id not in store.rows():
             return
-        task = store.get(task_id)
+        task = manager.ensure_task(task_id)
         if action == "archive-empty":
             manager.archive_if_empty(task)
             return
@@ -123,6 +136,8 @@ def execute_action(manager, action, task_id, args):
             store.save(task)
             return
         if action in ("attach", "shell", "open"):
+            if action != "shell":
+                require_checkout(task)
             if task["state"] != "active":
                 if getattr(args, "active_only", False):
                     raise TaskError("Task is no longer active")
@@ -132,13 +147,14 @@ def execute_action(manager, action, task_id, args):
                     raise TaskError("Use attach to open a task in this SSH terminal")
                 manager.desktop.open(task)
                 return
-            manager.agent.ensure_session(task, store)
+            if action != "shell":
+                manager.agent.ensure_session(task, store)
         elif action == "restore":
             if args.desktop and not manager.desktop:
                 raise TaskError("--desktop requires a Hyprland session")
             manager.restore(task, args.desktop)
             if args.desktop:
-                manager.desktop.open(task)
+                manager.desktop.open(task, shell=not task.get("path"))
             return
         elif action == "archive":
             # The command may be running in a terminal that this archive will close.
@@ -146,7 +162,9 @@ def execute_action(manager, action, task_id, args):
             manager.archive(task)
             return
         elif action == "delete":
-            target = f'task {task["name"]} (keep {task["path"]})' if task.get("checkout_mode") == "existing" else f'{task["name"]} and {task["path"]}'
+            target = f'task {task["name"]}'
+            if task.get("path"):
+                target = f'{task["name"]} and {task["path"]}' if owns_checkout(task) else f'task {task["name"]} (keep {task["path"]})'
             if not args.yes and input(f'Delete {target}? [y/N] ').lower() != "y":
                 return
             signal.signal(signal.SIGHUP, signal.SIG_IGN)
@@ -158,6 +176,9 @@ def execute_action(manager, action, task_id, args):
                 task["name"] = task_name(name)
                 store.save(task)
             return
+        elif action == "set-checkout":
+            manager.attach_checkout(task, args.repo)
+            return
         elif action == "snooze":
             if args.minutes < 0:
                 raise TaskError("Snooze duration cannot be negative")
@@ -165,7 +186,7 @@ def execute_action(manager, action, task_id, args):
             store.save(task)
             return
     # Same explicit session on desktop and SSH. No --standalone and no last-session guessing.
-    os.chdir(task["path"])
+    os.chdir(task_directory(task))
     env = task_environment(task)
     command = [os.environ.get("SHELL", "/bin/bash")] if action == "shell" else ["opencode", "--session", task["session"], task["path"]]
     os.execvpe(command[0], command, env)
@@ -174,6 +195,9 @@ def execute_action(manager, action, task_id, args):
 def desktop_menu(manager, action, task_id, window=None):
     """Gather input before locking so an abandoned menu never blocks other operations."""
     store = manager.store
+    if task_id:
+        with store.lock():
+            manager.ensure_task(task_id)
     if action == "actions" and not task_id:
         window = window or manager.desktop.promotion_window()
         repo = choose_repo(manager.settings, graphical=True, existing=True)
@@ -218,12 +242,19 @@ def desktop_menu(manager, action, task_id, window=None):
             raise TaskError("The current row is not a managed task")
         return
     task = store.get(task_id)
-    delete_label = "Delete task (keep working copy)" if task.get("checkout_mode") == "existing" else "Delete task and workspace"
+    delete_label = "Delete task"
+    if owns_checkout(task):
+        delete_label = "Delete task and workspace"
+    elif task.get("path"):
+        delete_label = "Delete task (keep working copy)"
     if action == "actions":
         choices = [(name, label, "") for name, label in (
-            ("open", "Open agent"), ("shell", "New terminal"), ("browser", "New browser window"),
-            ("zed", "Zed"), ("rename", "Rename"),
+            ("shell", "New terminal"), ("browser", "New browser window"), ("rename", "Rename"),
             ("snooze", "Snooze"), ("archive", "Archive"), ("delete", delete_label))]
+        if task.get("path"):
+            choices = [("open", "Open agent", ""), ("zed", "Zed", "")] + choices
+        else:
+            choices.insert(0, ("set-checkout", "Attach working copy", "Optional; used for agent and editor launches"))
         action = pick(task["name"], choices, graphical=True)
         if not action:
             return
@@ -242,13 +273,17 @@ def desktop_menu(manager, action, task_id, window=None):
             return
     elif action == "delete":
         if pick(delete_label + "?", [("no", "Cancel", ""),
-                ("yes", f'Delete {task["name"]}', task["path"])], graphical=True) != "yes":
+                ("yes", f'Delete {task["name"]}', task.get("path") or "")], graphical=True) != "yes":
+            return
+    elif action == "set-checkout":
+        value = choose_repo(manager.settings, graphical=True, existing=True)
+        if not value:
             return
     with store.lock():
         task = store.get(task_id)
         if action == "restore":
             manager.restore(task, desktop=True)
-            manager.desktop.open(task)
+            manager.desktop.open(task, shell=not task.get("path"))
         elif action == "switch":
             manager.desktop.reserve(task)
             manager.desktop.jump(task)
@@ -264,6 +299,8 @@ def desktop_menu(manager, action, task_id, window=None):
             manager.delete(task)
         elif action == "zed":
             manager.desktop.open_zed(task)
+        elif action == "set-checkout":
+            manager.attach_checkout(task, value)
         elif action == "rename":
             task["name"] = task_name(value)
             store.save(task)
@@ -285,7 +322,9 @@ def task_choices(store, archived=None):
         status = task["state"] if task["state"] != "active" else task.get("activity", "unknown")
         if task.get("snoozed_until", 0) > time.time():
             status += " · snoozed"
-        checkout = task["path"] if task.get("checkout_mode") == "existing" else Path(task["repo"]).name
+        checkout = "no working copy"
+        if task.get("path"):
+            checkout = task["path"] if task.get("checkout_mode") == "existing" else Path(task["repo"]).name
         subtitle = f'{location} · {checkout} · {status} · {task["id"]}'
         result.append((task["id"], task["name"], subtitle))
     return result
@@ -311,17 +350,17 @@ def watch_tasks(store, agent, once=False):
     """
     while True:
         snapshot = store.read()
+        sessions = [task for task in snapshot.values() if task["state"] == "active" and task.get("session")]
         updates = {}
         try:
-            active = agent.api("get", "/api/session/active")["data"] if snapshot else {}
-            for task in snapshot.values():
-                if task["state"] == "active":
-                    try:
-                        updates[task["id"]] = agent.status(task, active)
-                    except (TaskError, OSError, ValueError, KeyError, subprocess.SubprocessError):
-                        updates[task["id"]] = "unknown"
+            active = agent.api("get", "/api/session/active")["data"] if sessions else {}
+            for task in sessions:
+                try:
+                    updates[task["id"]] = agent.status(task, active)
+                except (TaskError, OSError, ValueError, KeyError, subprocess.SubprocessError):
+                    updates[task["id"]] = "unknown"
         except (TaskError, OSError, ValueError, KeyError, subprocess.SubprocessError):
-            updates = {key: "unknown" for key, task in snapshot.items() if task["state"] == "active"}
+            updates = {task["id"]: "unknown" for task in sessions}
         with store.lock():
             for key, status in updates.items():
                 current = store.read().get(key)

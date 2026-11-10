@@ -8,7 +8,7 @@ return function(options)
   if path == nil then path = state .. "/rows.tsv" end
   local command = options.command or "hyprgrid-task"
   hyprgrid.columns = options.columns or { ["1"] = true, ["2"] = true, ["3"] = true }
-  -- Keep letter shortcuts stable; new/restored tasks claim holes instead of shifting other rows.
+  -- Keep letter shortcuts stable unless explicitly organized; new/restored tasks claim holes.
   hyprgrid.stable_rows = true
   -- Omarchy's universal clipboard shortcuts select Ctrl+Shift+C/V using this tag.
   o.window("(org\\.hyprgrid\\.task[a-z0-9]+|hyprgrid-[a-z0-9]+)", { tag = "+terminal" })
@@ -78,6 +78,10 @@ return function(options)
       for _, candidate in ipairs(hl.get_windows()) do
         if candidate.address == address and (candidate.initial_class or candidate.class) == app_id then
           target = target or "name:2" .. string.char(string.byte("a") + row - 2)
+          -- Organization can renumber the launch cell while Zed is still starting.
+          -- Keep its captured tool column, but resolve the task's current row at mapping time.
+          local column = target:match("^name:(%d+)[a-l]$")
+          if column then target = "name:" .. column .. string.char(string.byte("a") + row - 2) end
           hyprgrid.route_window(address, target, follow)
         end
       end
@@ -159,9 +163,26 @@ return function(options)
   hl.unbind("SUPER + T") -- replaces OpenWhispr tap-to-dictate
   hl.bind("SUPER + T", function()
     hl.dispatch(hl.dsp.submap("hyprgrid-tasks"))
+    local ws = hl.get_active_workspace()
+    local letter = ws and ws.name:match("^%d+([a-l])$")
+    if letter then
+      local id
+      for candidate, row in pairs(hyprgrid.rows) do
+        if row == letter:byte() - string.byte("a") + 2 then id = candidate; break end
+      end
+      if not id then
+        -- Claim identity before the next submap key can run. Python writes metadata
+        -- asynchronously, so no compositor callback waits for the lifecycle lock.
+        local file = assert(io.open("/proc/sys/kernel/random/uuid", "r"))
+        id = assert(file:read("*l")):gsub("%-", ""):sub(1, 12)
+        file:close()
+        hyprgrid.claim(id, letter)
+      end
+      hl.exec_cmd(command .. " ensure-task " .. id)
+    end
     if hl.notification then
       if hint then hint:dismiss() end
-      hint = hl.notification.create({ text = "TASKS  a–l jump · Enter picker · n new · s snooze · x archive · r restore · Space actions · Esc cancel", timeout = 60000 })
+      hint = hl.notification.create({ text = "TASKS  a–l jump · Enter picker · n new · o organize · s snooze · x archive · r restore · Space actions · Esc cancel", timeout = 60000 })
     end
   end, { description = "Tasks" })
 
@@ -174,6 +195,8 @@ return function(options)
     for key, name in pairs({ Return = "switch", n = "new", s = "snooze", x = "archive", r = "restore", space = "actions" }) do
       hl.bind(key, function() action(name) end, { description = "Task " .. name })
     end
+    hl.bind("o", function() leave(); hl.exec_cmd(command .. " organize") end,
+      { description = "Organize task rows" })
     hl.bind("0", function() leave(); hyprgrid.jump_letter("0") end)
     hl.bind("Escape", leave)
     hl.bind("catchall", leave)

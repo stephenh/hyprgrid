@@ -1,4 +1,4 @@
-"""Persistent jj tasks, independent of the desktop and its current row labels."""
+"""Persistent tasks with optional jj checkouts, independent of desktop row labels."""
 
 from contextlib import contextmanager
 import fcntl
@@ -124,6 +124,7 @@ class OpenCode:
 
     def ensure_session(self, task, store):
         """Persist identity before setting environment so failed setup can resume safely."""
+        require_checkout(task)
         if not task.get("session"):
             result = self.api("post", "/api/session", {
                 "title": task["name"], "location": {"directory": task["path"]},
@@ -144,7 +145,7 @@ class OpenCode:
         # Detached shell tools and persistent terminals can outlive a session turn.
         # Shell commands are location-scoped, not session-scoped. A borrowed checkout
         # can also contain unrelated sessions, so only dedicated checkouts own these.
-        if task.get("checkout_mode") != "existing":
+        if owns_checkout(task):
             query = urlencode({"location[directory]": task["path"]})
             for shell in self.api("get", "/api/shell?" + query)["data"]:
                 self.api("delete", f'/api/shell/{shell["id"]}?' + query)
@@ -202,6 +203,53 @@ class Manager:
         self.agent = agent or OpenCode()
         self.desktop = desktop
 
+    def ensure_task(self, task_id):
+        """Publish metadata for an ID already assigned by the compositor.
+
+        Key actions can arrive before the prefix's background command. Either can
+        initialize metadata, but a delayed prefix must not reactivate an archived task.
+        """
+        existing = self.store.read().get(task_id)
+        if existing:
+            return existing
+
+        row = self.store.rows().get(task_id)
+        if row is None:
+            raise TaskError("Task row is no longer assigned")
+        letter = chr(ord("a") + row - 2)
+        path = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "hypr/workspace-descriptions.json"
+        descriptions = json.loads(path.read_text()) if path.exists() else {}
+        name = " ".join(str(descriptions.get(letter) or "Task " + letter).split())[:120]
+
+        task = {"id": task_id, "name": task_name(name or "Task " + letter),
+                "repo": None, "path": None, "checkout_mode": "none", "workspace": None,
+                "base": None, "session": None, "state": "active", "activity": "idle",
+                "snoozed_until": 0, "created": time.time(), "hooks": {}}
+        self.store.save(task)
+        return task
+
+    def attach_checkout(self, task, repo):
+        """Attach an existing working copy without setup, session creation, or renaming."""
+        if task.get("path"):
+            raise TaskError("Task already has a working copy")
+        repo = Path(repo).expanduser().resolve()
+        if not (repo / ".jj/repo").exists():
+            raise TaskError(f"Not a jj repository: {repo}")
+        self.check_checkout_available(repo)
+        task.update(repo=str(repo), path=str(repo), repo_identity=str(repo_identity(repo)),
+                    checkout_mode="existing")
+        self.store.save(task)
+
+    def organize(self):
+        """Preserve pending task names before asking the compositor to close row gaps."""
+        if not self.desktop:
+            raise TaskError("Organize requires a Hyprland desktop session")
+        # A just-pressed prefix may not have published its task metadata yet. Capture
+        # its original description before row assignments and description keys change.
+        for task_id in self.store.rows():
+            self.ensure_task(task_id)
+        self.desktop.organize()
+
     def create(self, repo, name=None, desktop=False, existing=False, adopt_window=None):
         """Create an isolated working copy or wrap an existing checkout without owning it.
 
@@ -219,9 +267,7 @@ class Manager:
         base = None
         path = repo
         if existing:
-            for task in self.store.read().values():
-                if Path(task["path"]).resolve() == repo:
-                    raise TaskError(f'Checkout already belongs to task {task["name"]} ({task["id"]}); open or restore it')
+            self.check_checkout_available(repo)
         else:
             base = run(["jj", "--ignore-working-copy", "log", "-r", "trunk()", "--no-graph", "-T", "commit_id"], cwd=repo).strip()
             if not re.fullmatch(r"[0-9a-f]{40,64}", base):
@@ -260,7 +306,8 @@ class Manager:
         task.update(state="preparing", error=None)
         self.store.save(task)
         self.hook(task, "setup")
-        self.agent.ensure_session(task, self.store)
+        if task.get("path"):
+            self.agent.ensure_session(task, self.store)
         task.update(state="active", activity="idle", error=None)
         self.store.save(task)
 
@@ -269,6 +316,9 @@ class Manager:
         try:
             if desktop:
                 self.desktop.reserve(task)
+            if not task.get("path"):
+                self.prepare(task)
+                return task
             if not Path(task["path"]).exists():
                 if task.get("checkout_created") or task.get("checkout_mode") == "existing":
                     raise TaskError("Task checkout is missing; recover it before restoring this task")
@@ -305,7 +355,7 @@ class Manager:
                     raise TaskError("This task has desktop windows; archive it from the desktop")
                 if close_windows:
                     self.desktop.close(task)
-            if Path(task["path"]).exists():
+            if task.get("path") and Path(task["path"]).exists():
                 self.hook(task, "teardown")
             if task["id"] in self.store.rows():
                 self.desktop.release(task)
@@ -317,7 +367,7 @@ class Manager:
 
     def delete(self, task):
         """Remove only a verified dedicated workspace; retain the agent's conversation."""
-        if task.get("checkout_mode") == "existing":
+        if not owns_checkout(task):
             self.archive(task)
             self.store.remove(task["id"])
             return
@@ -349,8 +399,8 @@ class Manager:
 
     def hook(self, task, name):
         """Log hook output outside the checkout so failures remain inspectable after cleanup."""
-        # Existing checkouts keep their own environment, including any running services.
-        if task.get("checkout_mode") == "existing":
+        # Borrowed checkouts keep their own environment; basic tasks have no checkout at all.
+        if not owns_checkout(task):
             return
         command = task["hooks"][name]
         cwd = Path(task["path"])
@@ -371,14 +421,41 @@ class Manager:
         task.update(state=f"{phase}-failed", error=str(error))
         self.store.save(task)
 
+    def check_checkout_available(self, repo):
+        """Keep a checkout associated with only one task, including archived tasks."""
+        for task in self.store.read().values():
+            if task.get("path") and Path(task["path"]).resolve() == repo:
+                raise TaskError(f'Checkout already belongs to task {task["name"]} ({task["id"]}); open or restore it')
+
 
 def task_environment(task):
     """Apply task identity to hooks, shells, and the server-side agent environment."""
-    environment = {**os.environ, "HYPRGRID_TASK_ID": task["id"], "HYPRGRID_REPO": task["repo"],
-                   "HYPRGRID_WORKSPACE": task["path"]}
-    if task.get("checkout_mode") != "existing":
+    environment = {**os.environ, "HYPRGRID_TASK_ID": task["id"]}
+    if task.get("path"):
+        environment.update(HYPRGRID_REPO=task["repo"], HYPRGRID_WORKSPACE=task["path"])
+    else:
+        # A launcher running inside another task must not lend its checkout to this task.
+        environment.pop("HYPRGRID_REPO", None)
+        environment.pop("HYPRGRID_WORKSPACE", None)
+    if owns_checkout(task):
         environment["COMPOSE_PROJECT_NAME"] = f'hyprgrid-{task["id"]}'
     return environment
+
+
+def owns_checkout(task):
+    """Tasks saved before checkout modes were introduced always owned a dedicated workspace."""
+    return task.get("checkout_mode", "dedicated") == "dedicated"
+
+
+def task_directory(task):
+    """Ordinary terminals can use home when a task has no associated working copy."""
+    return task.get("path") or str(Path.home())
+
+
+def require_checkout(task):
+    """Fail before launching checkout-dependent tools, rather than guessing a repository."""
+    if not task.get("path"):
+        raise TaskError("Attach a working copy to this task first")
 
 
 def repo_identity(path):

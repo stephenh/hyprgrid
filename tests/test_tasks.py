@@ -16,7 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tasks"))
 from core import Manager, OpenCode, Settings, Store, TaskError, task_environment
 from desktop import Desktop, chromium_profiles, lua_string, menu_rows, task_terminal_command, task_terminal_launch, task_app_id
-from cli import desktop_menu, main
+from cli import desktop_menu, execute_action, main, task_choices, watch_tasks
 
 
 class SessionService:
@@ -53,6 +53,10 @@ class DesktopState:
         if self.windows:
             raise TaskError("Task still has open windows")
         (self.store.path / "rows.tsv").write_text("")
+
+    def close(self, task):
+        """Model windows accepting their graceful close requests."""
+        self.windows.clear()
 
 
 class ShellService(OpenCode):
@@ -102,6 +106,17 @@ class TaskLauncher:
 
     def reserve(self, task):
         """No compositor row is allocated by this menu test."""
+
+
+class OrganizingDesktop:
+    """Model the compositor renumbering a task whose prefix metadata is still queued."""
+
+    def __init__(self, store):
+        self.store = store
+
+    def organize(self):
+        """Move the already-assigned task from i to a without changing its identity."""
+        (self.store.path / "rows.tsv").write_text("late\t2\n")
 
 
 class TaskWorkspacesTest(unittest.TestCase):
@@ -737,6 +752,237 @@ class TaskWorkspacesTest(unittest.TestCase):
             desktop_menu(self.manager, "new", None)
         # Then the dedicated task keeps its entered name.
         self.assertEqual(next(iter(self.store.read().values()))["name"], "Invoice rounding")
+
+    def test_auto_promoted_task_does_not_have_a_checkout(self):
+        # Given a row assigned by the compositor before the background command runs.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        # When the coordinator publishes its metadata.
+        task = self.manager.ensure_task("row123")
+        # Then the working copy is optional.
+        self.assertIsNone(task["path"])
+
+    def test_auto_promoted_task_does_not_create_an_agent_session(self):
+        # Given a newly assigned desktop row.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        # When publishing its metadata.
+        self.manager.ensure_task("row123")
+        # Then no managed agent has been created.
+        self.assertEqual(self.agent.sessions, {})
+
+    def test_auto_promoted_task_uses_the_existing_row_description(self):
+        # Given an existing row description and a new task assignment.
+        descriptions = Path(os.environ["XDG_STATE_HOME"]) / "hypr/workspace-descriptions.json"
+        descriptions.parent.mkdir(parents=True)
+        descriptions.write_text(json.dumps({"b": "Release planning"}))
+        # And the compositor's row reservation.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        # When publishing metadata.
+        task = self.manager.ensure_task("row123")
+        # Then the task keeps the existing row name.
+        self.assertEqual(task["name"], "Release planning")
+
+    def test_auto_promoted_task_defaults_to_the_row_letter(self):
+        # Given a new task reservation without a saved description.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        # When publishing metadata.
+        task = self.manager.ensure_task("row123")
+        # Then it has a useful name without prompting.
+        self.assertEqual(task["name"], "Task b")
+
+    def test_auto_promoted_task_can_be_archived_without_a_checkout(self):
+        # Given an automatically promoted row whose final window has closed.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        self.manager.desktop = DesktopState(self.store, task)
+        # When its lifecycle operation runs.
+        self.manager.archive_if_empty(task)
+        # Then the task is archived without needing a working copy or teardown.
+        self.assertEqual(self.store.get(task["id"])["state"], "archived")
+
+    def test_delayed_prefix_registration_does_not_reactivate_an_archived_task(self):
+        # Given an archive action that won the race with the prefix's background command.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        self.manager.desktop = DesktopState(self.store, task)
+        self.manager.archive(task)
+        # When the delayed prefix command resolves the same task ID.
+        self.manager.ensure_task("row123")
+        # Then archive remains authoritative.
+        self.assertEqual(self.store.get("row123")["state"], "archived")
+
+    def test_auto_promoted_task_restore_does_not_create_a_session(self):
+        # Given an archived task with no working copy.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        self.manager.desktop = DesktopState(self.store, task)
+        self.manager.archive(task)
+        # When restoring it headlessly.
+        self.manager.restore(task)
+        # Then its agent remains optional.
+        self.assertEqual(self.agent.sessions, {})
+
+    def test_auto_promoted_task_delete_only_removes_its_record(self):
+        # Given a basic task whose windows have closed.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        self.manager.desktop = DesktopState(self.store, task)
+        # When deleting the task.
+        self.manager.delete(task)
+        # Then it is forgotten without a checkout cleanup operation.
+        self.assertEqual(self.store.read(), {})
+
+    def test_working_copy_can_be_attached_to_a_basic_task_later(self):
+        # Given a basic task with no checkout.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        # When choosing a working copy for future managed launches.
+        self.manager.attach_checkout(task, self.repo)
+        # Then the selected directory is saved on the same task.
+        self.assertEqual(self.store.get("row123")["path"], str(self.repo))
+
+    def test_attaching_a_working_copy_does_not_start_an_agent(self):
+        # Given a basic task and a repository with setup hooks.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        # When attaching the existing checkout.
+        self.manager.attach_checkout(task, self.repo)
+        # Then attachment alone does not launch an agent.
+        self.assertEqual(self.agent.sessions, {})
+
+    def test_task_picker_supports_tasks_without_a_working_copy(self):
+        # Given a named task with no working copy.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        self.manager.ensure_task("row123")
+        # When listing tasks.
+        choices = task_choices(self.store)
+        # Then its row and lack of a working copy are visible.
+        self.assertEqual(choices, [("row123", "Task b", "b · no working copy · idle · row123")])
+
+    def test_pathless_task_terminal_starts_in_home(self):
+        # Given a task without a working copy.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        # When building its ordinary terminal launch.
+        command = task_terminal_launch("hyprgrid-task", task, shell=True)
+        # Then it uses the user's home directory, not an invented checkout.
+        self.assertEqual(command[-1], "--dir=" + str(Path.home()))
+
+    def test_pathless_task_environment_does_not_include_null_checkout_values(self):
+        # Given a task without a working copy.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        # When constructing an otherwise empty terminal environment.
+        with patch.dict(os.environ, {}, clear=True):
+            environment = task_environment(task)
+        # Then only the task identity is added.
+        self.assertEqual(environment, {"HYPRGRID_TASK_ID": "row123"})
+
+    def test_pathless_tasks_do_not_contact_opencode_during_activity_checks(self):
+        # Given a basic task with no session.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        self.manager.ensure_task("row123")
+        # And a service that must not be contacted just to manage a desktop row.
+        with patch.object(self.manager.agent, "api", create=True, side_effect=AssertionError("Unexpected API request")):
+            # When checking activity once.
+            watch_tasks(self.store, self.manager.agent, once=True)
+        # Then it remains idle rather than reporting an unknown agent state.
+        self.assertEqual(self.store.get("row123")["activity"], "idle")
+
+    def test_attaching_a_working_copy_does_not_run_setup(self):
+        # Given a basic task and a checkout with an available setup hook.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        # When attaching that checkout.
+        self.manager.attach_checkout(task, self.repo)
+        # Then setup has not started the checkout's service.
+        self.assertFalse((self.repo / "service").exists())
+
+    def test_working_copy_attachment_preserves_the_task_name(self):
+        # Given a basic task with a chosen name.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        task["name"] = "Release planning"
+        self.store.save(task)
+        # When attaching a checkout with a different directory name.
+        self.manager.attach_checkout(task, self.repo)
+        # Then attachment does not rename the task.
+        self.assertEqual(self.store.get("row123")["name"], "Release planning")
+
+    def test_auto_archive_can_arrive_before_the_prefix_metadata_command(self):
+        # Given a compositor-assigned task whose final window closed before Python initialized it.
+        self.manager.desktop = DesktopState(self.store, {"id": "row123"})
+        # When the closure action reaches the coordinator first.
+        execute_action(self.manager, "archive-empty", "row123", None)
+        # Then it both initializes and archives that task, rather than leaking the row.
+        self.assertEqual(self.store.get("row123")["state"], "archived")
+
+    def test_actions_can_attach_a_checkout_before_prefix_metadata_finishes(self):
+        # Given a task ID already assigned by the compositor, but no saved task metadata yet.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        # And an immediate action to attach a checkout.
+        with patch("cli.pick", side_effect=["set-checkout", str(self.repo)]):
+            # When opening task actions ahead of the prefix's background command.
+            desktop_menu(self.manager, "actions", "row123")
+        # Then the checkout is attached to the same task identity.
+        self.assertEqual(self.store.get("row123")["path"], str(self.repo))
+
+    def test_agent_launch_requires_a_working_copy(self):
+        # Given a basic task with no associated working copy.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        # When requesting its first agent session.
+        # Then it reports the missing association instead of guessing a directory.
+        with self.assertRaisesRegex(TaskError, "Attach a working copy"):
+            OpenCode().ensure_session(task, self.store)
+
+    def test_attached_checkout_cannot_already_belong_to_another_task(self):
+        # Given a checkout registered to another task.
+        self.manager.create(self.repo, existing=True)
+        # And a new basic task.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        # When selecting that same checkout for the basic task.
+        # Then ownership is not duplicated.
+        with self.assertRaisesRegex(TaskError, "already belongs"):
+            self.manager.attach_checkout(task, self.repo)
+
+    def test_delayed_prefix_command_does_not_recreate_a_deleted_task(self):
+        # Given a promoted task that was deleted before the prefix's background command ran.
+        (self.store.path / "rows.tsv").write_text("row123\t3\n")
+        task = self.manager.ensure_task("row123")
+        self.manager.desktop = DesktopState(self.store, task)
+        self.manager.delete(task)
+        # When the delayed registration command arrives.
+        with patch.dict(os.environ, {"HYPRGRID_STATE_DIR": str(self.store.path)}), \
+                patch("sys.argv", ["hyprgrid-task", "ensure-task", "row123"]):
+            main()
+        # Then it leaves the task deleted instead of reserving another row.
+        self.assertEqual(self.store.read(), {})
+
+    def test_organize_initializes_pending_task_names_before_renumbering(self):
+        # Given a promoted row whose saved description has not yet become task metadata.
+        descriptions = Path(os.environ["XDG_STATE_HOME"]) / "hypr/workspace-descriptions.json"
+        descriptions.parent.mkdir(parents=True)
+        descriptions.write_text(json.dumps({"i": "Release planning"}))
+        # And a queued prefix for row i.
+        (self.store.path / "rows.tsv").write_text("late\t10\n")
+        self.manager.desktop = OrganizingDesktop(self.store)
+        # When organize runs ahead of the prefix's metadata command.
+        self.manager.organize()
+        # Then the task name came from its original row, not its new letter.
+        self.assertEqual(self.store.get("late")["name"], "Release planning")
+
+    def test_organize_cli_updates_the_compositor_owned_row_snapshot(self):
+        # Given an isolated desktop and a sparse row.
+        (self.store.path / "rows.tsv").write_text("late\t10\n")
+        desktop = OrganizingDesktop(self.store)
+        # When the organize command is dispatched.
+        with patch.dict(os.environ, {"HYPRGRID_STATE_DIR": str(self.store.path), "HYPRLAND_INSTANCE_SIGNATURE": "test"}), \
+                patch("cli.Desktop", return_value=desktop), \
+                patch("sys.argv", ["hyprgrid-task", "organize"]):
+            main()
+        # Then the same task identity has the compacted row.
+        self.assertEqual(self.store.rows(), {"late": 2})
 
 
 if __name__ == "__main__":

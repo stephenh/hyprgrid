@@ -12,10 +12,17 @@ rows (`a–l`). No agent orchestration, PR tracking, or desktop-session restorat
   another row must not change its identity, checkout path, or agent session association.
 - Keep row letters fixed while the task adapter is enabled. Archive frees a slot;
   new/restored tasks claim the first available slot without compacting other rows.
-- Record its name, source repository, jj workspace name/path, resumable OpenCode
+- `Super+T → o` explicitly organizes all surviving rows into consecutive letters,
+  preserving order, task identity, descriptions, and each monitor's viewed task.
+  Reserved tasks without windows still occupy a slot; numeric home workspaces do not
+  renumber. Automatic compaction stays disabled afterward.
+- Record its name, optional source repository and jj workspace name/path, resumable OpenCode
   session reference, optional active row, and attention/snooze state.
 - Keep task metadata outside checkouts. Archived tasks remain discoverable without
   open windows or a grid row.
+- A task can be just a named desktop row. Entering `Super+T` on an unmanaged grid
+  row registers it while entering the submap, without a checkout or agent session.
+  Use its saved description or `Task <letter>`; keep all existing windows in place.
 - Always use OpenCode as the managed harness. Other agents, such as Claude, can be
   launched manually in ordinary task terminals and need no harness integration.
 
@@ -34,14 +41,16 @@ rows (`a–l`). No agent orchestration, PR tracking, or desktop-session restorat
   removes only the task record, never the borrowed directory or jj workspace.
 - Existing-working-copy discovery deduplicates resolved paths, not shared jj repositories.
   Each working copy can belong to only one task, including archived tasks.
-- An unmanaged desktop row can be promoted in place and associated with an existing
-  working copy. `Super+T → Space` starts the checkout picker directly for an
-  unmanaged row and keeps the normal actions menu for a managed row. Keep every window
-  and the row's letter; do not open another terminal
-  or implicitly adopt existing agent conversations. Recheck ownership using a window
-  captured before prompting. Future managed launches use the selected working copy;
-  existing shells and editor projects are not reconfigured.
-- Existing-working-copy tasks and promotions default to the checkout directory's
+- An unmanaged desktop row is promoted in place by `Super+T`, including an empty
+  active grid cell. Keep every window and the row's letter; do not open another
+  terminal or implicitly adopt existing agent conversations. The compositor assigns
+  identity before the next key, and the coordinator publishes metadata asynchronously.
+- Attach a working copy later through task actions if wanted. Attachment preserves
+  the task's name and runs neither setup nor an agent. Agent/editor actions require
+  that association; ordinary terminals use home without it. Existing shells and
+  editor projects are not reconfigured.
+- Tasks created from existing working copies (including explicit `promote --repo`)
+  default to the checkout directory's
   name without a naming prompt. Keep that name until an explicit rename; CLI users
   can override it with `--name` at creation.
 - Per-repository settings specify dependency/test setup and environment teardown.
@@ -95,13 +104,15 @@ task/repository pickers, naming, snooze durations, and task actions. Add static 
 points to the Omarchy menu if useful. Start with status snapshots in the picker;
 a custom live Quickshell overview is optional later.
 
-`Super+T` replaces OpenWhispr tap-to-dictate and enters a one-shot task submap:
+`Super+T` replaces OpenWhispr tap-to-dictate, promotes the current unmanaged grid row
+if necessary, and enters a one-shot task submap. Home/root workspaces are not promoted:
 
 | Next key | Action |
 | --- | --- |
 | `a–l` | Jump to task row, preserving column; all monitors follow |
 | `Enter` | Task picker |
 | `n` | New task |
+| `o` | Organize and renumber surviving rows |
 | `s` | Snooze current task |
 | `x` | Archive current task |
 | `r` | Archived-task picker / restore |

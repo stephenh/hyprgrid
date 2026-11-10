@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import time
 
-from core import TaskError, run, task_environment
+from core import TaskError, require_checkout, run, task_directory, task_environment
 
 
 class Desktop:
@@ -29,6 +29,10 @@ class Desktop:
     def reserve(self, task):
         """Allocate without focusing; setup can continue while the user works elsewhere."""
         self.evaluate(f'hyprgrid.reserve({lua_string(task["id"])})')
+
+    def organize(self):
+        """Compact all rows in one compositor callback, preserving task identities."""
+        self.evaluate("hyprgrid.organize()")
 
     def adopt(self, task, address):
         """Claim the captured window's row without moving, closing, or opening windows."""
@@ -62,6 +66,8 @@ class Desktop:
 
     def open(self, task, shell=False):
         """Launch a tagged native terminal; the Lua adapter routes its eventual window."""
+        if not shell:
+            require_checkout(task)
         self.reserve(task)
         self.jump(task, column="2")
         app_id = task_app_id(task["id"])
@@ -90,6 +96,7 @@ class Desktop:
 
     def open_zed(self, task):
         """Open the task checkout as a new Zed project on the launch workspace."""
+        require_checkout(task)
         editor = shutil.which("zeditor") or shutil.which("zed")
         if not editor:
             raise TaskError("Zed is not installed")
@@ -221,7 +228,7 @@ def task_terminal_launch(executable, task, shell=False):
     environment = task_environment(task)
     command = ["env", *[f"{key}={value}" for key, value in environment.items()
                         if os.environ.get(key) != value],
-               "xdg-terminal-exec", f'--app-id={task_app_id(task["id"])}', f'--dir={task["path"]}']
+               "xdg-terminal-exec", f'--app-id={task_app_id(task["id"])}', f'--dir={task_directory(task)}']
     # Passing a command overrides Ghostty's configured Fish with the login shell (often Bash).
     if not shell:
         command += ["--", *task_terminal_command(executable, task["id"])]

@@ -1,7 +1,7 @@
 # Task workspaces
 
 `hyprgrid-task` is the shared CLI behind desktop menus and SSH access. It needs
-Python 3, jj, and OpenCode V2. Desktop features additionally use Omarchy's menus,
+Python 3; checkout and agent features use jj and OpenCode V2. Desktop features use Omarchy's menus,
 `xdg-terminal-exec`, and the Lua grid adapter. No tmux or Herdr is required.
 
 ## Install
@@ -50,17 +50,21 @@ user binaries and mise shims. Restart it after changing the Python implementatio
 
 ## Keyboard
 
-Press and release `Super+T`, then:
+Press and release `Super+T`, then use the keys below. On an unmanaged grid row
+(`a–l`), the prefix also makes that row a task immediately, without any prompt,
+checkout, or agent session. Existing tasks are reused; home/root workspaces are not
+promoted. Canceling the submap does not undo promotion.
 
 | Key | Action |
 | --- | --- |
 | `a–l` | Jump to that task row, retaining the tool column |
 | `Enter` | Active task picker |
 | `n` | Choose existing working copy or new jj workspace, open OpenCode |
+| `o` | Organize: close gaps and renumber rows in their current order |
 | `s` | Snooze the current task (or unsnooze) |
 | `x` | Archive the current task |
 | `r` | Restore an archived task and open its agent |
-| `Space` | Current-task actions, or promote an unmanaged row |
+| `Space` | Current-task actions, including optional working-copy attachment |
 | `0` | Home row |
 | `Escape` | Cancel |
 
@@ -73,9 +77,20 @@ headless tasks are not archived merely for having no windows.
 Failed-create and failed-restore tasks also auto-archive on their final window close;
 failed archives require an explicit retry.
 
-With the task adapter enabled, all row letters stay fixed, including unmanaged rows.
+With the task adapter enabled, all row letters stay fixed unless explicitly organized.
 Archiving `e` leaves `f` at `f`; the next new/restored task claims the first free slot.
 The standalone grid without the task adapter retains its original auto-compaction.
+
+**Super+T → o** explicitly packs surviving rows toward `a`, keeping their order across
+all columns. If only `i` and `j` remain, `2i` becomes `2a` and `2j` becomes `2b`;
+their editor/browser cells follow the same row mapping. Task IDs, names, checkouts,
+agent sessions, and descriptions are preserved. Each monitor keeps its viewed task
+under the new letter, and focus remains on the original monitor. Home columns are
+not renumbered. Empty managed task reservations still count as active rows; organize
+does not archive or delete them. Later window closures leave letters stable again.
+
+The same desktop-only operation is available as `hyprgrid-task organize`. It runs
+under the lifecycle lock and records any pending prefix metadata before renumbering.
 
 `Super+D` renames the managed task for the current row. Its task name is also the
 bar's workspace description, so there is no second name to synchronize. On unmanaged
@@ -100,7 +115,7 @@ symlink aliases are not. Choose **New jj workspace** for the original isolated w
 
 Existing-working-copy tasks automatically use the selected directory's name, without
 a name prompt: `~/homebound/graphql-service-2` becomes `graphql-service-2`. This also
-applies to promotions. Use `Super+D` or the task's **Rename** action to change it later;
+applies to explicit `promote --repo` creation. Use `Super+D` or **Rename** to change it later;
 CLI creation accepts an explicit `--name` override. New dedicated jj workspaces still
 prompt for a task name.
 
@@ -119,30 +134,37 @@ same checkout are not adopted or interrupted. Location-scoped detached shell com
 cannot be attributed to a session, so existing-working-copy tasks leave those alone
 on archive; their session-owned persistent terminals are still stopped.
 
-### Promote an existing row
+### Tasks without a working copy
 
-Already working in an unmanaged row such as `2b`? Press **Super+T → Space** to go
-straight to choosing the existing working copy. Its directory name becomes the task
-name. There is no separate promotion action or name prompt; canceling the checkout
-picker leaves the row unmanaged. All cells
-with that letter (`1b`, `2b`, `3b`, etc.) become one managed task **in place**. Their
-windows, row letter, monitor placement, and focus stay unchanged; no new agent window
-is opened. **Open agent** in the task-actions menu opens the task's saved conversation
-when wanted. Existing agent conversations are not automatically adopted.
+Already working in an unmanaged row such as `2b`? Press **Super+T**. All cells
+with that letter (`1b`, `2b`, `3b`, etc.) become one managed task **in place**, and
+the task submap stays active for the next key. Their windows, row letter, monitor
+placement, and focus stay unchanged. Even an empty active grid cell can be promoted.
 
-Promotion uses existing-working-copy mode: no setup/teardown or checkout removal.
-Existing shells and editor projects are not reconfigured; the selected checkout is
-used for new managed terminals, editor windows, and the managed agent. From promotion
-onward, normal task lifecycle applies to the whole row, including closing its windows
-on archive/delete and auto-archiving after its final window closes.
+The task uses the row's saved description, or **Task b** if none exists. No setup,
+teardown, checkout, or OpenCode session is needed. Rename, snooze, browser windows,
+archive/delete, and auto-archive work normally. **New terminal** starts in your home
+directory until a working copy is attached. Restoring a task with no working copy
+opens an ordinary terminal instead of an agent.
 
-Supported task rows are `a–l`; home/root workspaces are not promoted. On an already
-managed row, `Super+T → Space` continues to open the normal task-actions menu.
+**Super+T → Space → Attach working copy** optionally associates an existing checkout
+for future launches. Attachment preserves the task's name and does not run setup or
+start an agent. Once attached, **Open agent** and **Zed** are available. Existing
+shells, editor projects, and agent conversations are not reconfigured or adopted.
+The checkout is borrowed: archive skips teardown, and delete never removes it.
 
-The menu captures a representative window before prompting, then the compositor
-checks its row is still unmanaged when registration completes. A closed window or a
-row already claimed by another task is rejected rather than stealing a row. Promotion
-does not merge different letters into one task.
+The compositor assigns the task ID before the next submap key can run, then the
+coordinator publishes metadata in the background. Fast actions use the same identity;
+a delayed prefix command cannot recreate a task after archive/delete. Prefix presses
+on already-managed rows preserve their existing checkout, name, and agent session.
+
+Normal lifecycle applies to the whole row, including closing its windows on
+archive/delete and auto-archiving after its final window closes. Initially empty rows
+are not automatically archived. Promotion does not merge different letters.
+
+The explicit `promote --repo ...` CLI still supports promoting a populated unmanaged
+row directly into an existing-checkout task. Its captured window must still exist,
+and the row must remain unmanaged when registration completes.
 
 `Super+T → Space → Zed` opens a new Zed window on the current workspace, with
 the task checkout as its working directory and project. It uses `zeditor` on Arch,
@@ -162,11 +184,13 @@ hyprgrid-task attach <task-id>       # same saved OpenCode conversation
 hyprgrid-task new --repo ~/other/hyprgrid --name 'Task picker'
 hyprgrid-task new --existing --repo ~/other/hyprgrid  # task name: hyprgrid
 hyprgrid-task promote --row b --repo ~/homebound/example  # task name: example
+hyprgrid-task set-checkout <task-id> --repo ~/homebound/example  # optional attachment
 hyprgrid-task restore <task-id>      # setup, no desktop row or window
 hyprgrid-task shell <task-id>        # shell with the task's Compose environment
 ```
 
-Creation prints the task ID in headless mode. `attach` also restores an archived
+Creation prints the task ID in headless mode. Agent attachment requires an associated
+working copy. `attach` also restores an archived
 task when given its ID. The SSH TUI connects to the desktop's shared OpenCode service;
 closing the client is not archive. The task manager never stops that shared service.
 Interactive disconnect behavior still needs a user smoke test with the installed TUI.

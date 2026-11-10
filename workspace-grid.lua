@@ -229,11 +229,11 @@ end
 -- Hyprland's automatic fallback; an emptied active cell returns to its preceding occupied tag, or home.
 -- Event handlers schedule this after Hyprland's
 -- window lifecycle callback returns; workspace mutation from inside CWindow::~CWindow corrupts Hyprland.
-local function reconcile_tags(closed_cell)
+local function reconcile_tags(closed_cell, force_compact)
   if reconciling then return end
   reconciling = true
 
-  -- The standalone grid packs rows; task mode preserves letters and reuses holes on reserve.
+  -- The standalone grid packs rows; task mode preserves letters unless organize is explicit.
   local occ = {}
   for _, row in pairs(hyprgrid.rows) do occ[row] = true end
   for _, ws in ipairs(hl.get_workspaces()) do
@@ -245,7 +245,7 @@ local function reconcile_tags(closed_cell)
   table.sort(orows)
   local newrow, top, changed = {}, 1, false
   for i, r in ipairs(orows) do
-    newrow[r] = hyprgrid.stable_rows and r or i + 1
+    newrow[r] = (hyprgrid.stable_rows and not force_compact) and r or i + 1
     top = newrow[r]
     if newrow[r] ~= r then changed = true end
   end
@@ -277,6 +277,16 @@ local function reconcile_tags(closed_cell)
     return
   end
 
+  -- Explicit organization preserves each monitor's view, including monitors on the home row.
+  -- It must not treat the focused home workspace as a request to hide tasks on other monitors.
+  local views = {}
+  if force_compact then
+    for _, mon in ipairs(hl.get_monitors()) do
+      local col, row = cell_of(mon.active_workspace and mon.active_workspace.name)
+      if col then views[mon.name] = { col = col, row = row } end
+    end
+  end
+
   -- park every monitor on its home column so no grid cell stays visible during the renames
   syncing = true
   for _, m in ipairs(hl.get_monitors()) do
@@ -298,8 +308,9 @@ local function reconcile_tags(closed_cell)
           hl.dispatch(hl.dsp.workspace.rename({ workspace = "name:" .. ws.name, name = ws_name_for(c, newrow[r]) }))
         end
       end
-      remap[#remap + 1] = tag_of(r) .. "=" .. tag_of(newrow[r])
     end
+    -- The description store rebuilds all tag keys, so unchanged survivors need identity pairs too.
+    remap[#remap + 1] = tag_of(r) .. "=" .. tag_of(newrow[r])
   end
   syncing = false
 
@@ -310,7 +321,22 @@ local function reconcile_tags(closed_cell)
 
   -- Restore the saved column, not whichever home column Hyprland chose during fallback or parking.
   -- A surviving viewed tag follows its rename; an emptied one returns to the preceding occupied tag.
-  if origin then
+  if force_compact then
+    local function restore_view(monitor)
+      local view = views[monitor]
+      if not view then return end
+      hl.dispatch(hl.dsp.focus({ monitor = monitor }))
+      hl.dispatch(hl.dsp.focus({ workspace = selector_for(view.col, newrow[view.row] or 1) }))
+    end
+    -- Restore the focused monitor last, just as lock-step navigation does.
+    for _, mon in ipairs(hl.get_monitors()) do
+      if mon.name ~= origin then restore_view(mon.name) end
+    end
+    if origin then
+      restore_view(origin)
+      hl.dispatch(hl.dsp.focus({ monitor = origin }))
+    end
+  elseif origin then
     hl.dispatch(hl.dsp.focus({ monitor = origin }))
     set_all_to_row(return_row or (frow and (newrow[frow] or math.min(frow, top)) or 1), origin_col)
   end
@@ -338,6 +364,13 @@ local function schedule_reconcile(closed_cell)
     reconcile_closed_cell = nil
     if syncing then schedule_reconcile(cell) else reconcile_tags(cell) end
   end, { timeout = 50, type = "oneshot" })
+end
+
+-- Close gaps only on explicit request; future task lifecycle events still keep letters stable.
+function hyprgrid.organize()
+  -- Organization restores the current view. An earlier close callback still refers to old letters.
+  reconcile_closed_cell = nil
+  reconcile_tags(nil, true)
 end
 
 -- Step every locked monitor up/down one row together (creates grid workspaces on demand). I.e.
@@ -563,6 +596,20 @@ function hyprgrid.reserve(id)
   error("All 12 task rows are occupied")
 end
 
+-- Claim a specific row, including an empty active cell, without changing any workspace.
+function hyprgrid.claim(id, letter)
+  assert(type(id) == "string" and id:match("^[a-z0-9-]+$"), "Invalid task ID")
+  assert(type(letter) == "string" and letter:match("^[a-l]$"), "Invalid task row")
+  assert(not hyprgrid.rows[id], "Task already has a desktop row")
+  local row = letter:byte() - string.byte("a") + 2
+  for _, reserved in pairs(hyprgrid.rows) do
+    assert(reserved ~= row, "Row already belongs to a managed task")
+  end
+  hyprgrid.rows[id] = row
+  hyprgrid.on_rows_changed()
+  return row
+end
+
 -- Claim a populated row without moving windows. A captured window survives focus changes while
 -- prompts are open; a closed window must not let a stale menu claim a reused letter.
 function hyprgrid.adopt(id, address)
@@ -578,12 +625,7 @@ function hyprgrid.adopt(id, address)
     end
   end
   assert(row, "Promotion window is missing; reopen the task menu")
-  for _, reserved in pairs(hyprgrid.rows) do
-    assert(reserved ~= row, "Row already belongs to a managed task")
-  end
-  hyprgrid.rows[id] = row
-  hyprgrid.on_rows_changed()
-  return row
+  return hyprgrid.claim(id, string.char(string.byte("a") + row - 2))
 end
 
 -- Retain the reservation until every window has accepted its graceful close request.
