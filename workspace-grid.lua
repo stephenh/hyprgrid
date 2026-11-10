@@ -51,6 +51,11 @@ local function cell_of(name)
   return col, (tag ~= "" and tag:byte(1) - string.byte("a") + 2) or 1
 end
 
+-- Named workspace identity survives bad display renames; numbered homes retain their display column.
+local function workspace_cell(ws)
+  return cell_of((ws.id and ws.id > 0) and ws.name or (ws.addressable_name or ws.name))
+end
+
 -- Home column, row of the focused monitor's workspace. I.e. "2b" -> ("2", 3).
 local function current_cell()
   local ws = hl.get_active_workspace()
@@ -63,17 +68,55 @@ local function ws_name_for(col, row)
   return col .. string.char(string.byte("a") + row - 2)
 end
 
--- Workspace selector for a home column + row. I.e. ("2",1) -> "2" (home ws), ("2",3) -> "name:2b".
-local function selector_for(col, row)
-  if row <= 1 then return col end
-  return "name:" .. ws_name_for(col, row)
-end
-
 -- Hyprland 0.57 rejects name: selectors for numbers. Use the real numbered ID, not its display
--- name (Super+0 displays "0" but remains ID 10). Named grid cells have no numbered ID in 0.57.
+-- name (Super+0 displays "0" but remains ID 10). Named selectors use the immutable addressable_name,
+-- not the display name: workspace.rename changes only the latter in Hyprland 0.57.1.
 local function selector_for_workspace(ws)
   if ws.id and ws.id > 0 then return tostring(ws.id) end
-  return "name:" .. ws.name
+  return "name:" .. (ws.addressable_name or ws.name)
+end
+
+-- Resolve an existing cell's real address, preferring its windowed instance over an empty duplicate.
+-- Do not create a missing cell through an address already owned by a differently labelled workspace.
+local function selector_for(col, row)
+  -- Numbered selectors use IDs, not display labels. Roam is ID 10 displayed as 0; that intentional
+  -- alias is not the named-workspace corruption guarded below. Row navigation sees its display column.
+  if row <= 1 then return col == "0" and "10" or col end
+  local name = ws_name_for(col, row)
+  local found, collision
+  for _, ws in ipairs(hl.get_workspaces()) do
+    if ws.name == name then
+      if found and (found.windows or 0) > 0 and (ws.windows or 0) > 0 then
+        error("Multiple windowed workspaces display " .. name .. "; use workspace walking for recovery")
+      end
+      if not found or (ws.windows or 0) > 0 then found = ws end
+    elseif ws.addressable_name == name then
+      collision = ws
+    end
+  end
+  if found then return selector_for_workspace(found) end
+  assert(not collision, "Workspace address " .. name .. " belongs to another display label; recovery is needed")
+  return "name:" .. name
+end
+
+-- A bad display-only rename must not trigger further automatic moves or another compaction.
+local function grid_layout_problem()
+  local names = {}
+  for _, ws in ipairs(hl.get_workspaces()) do
+    local _, row = cell_of(ws.name)
+    if row and row >= 2 then
+      if names[ws.name] then return "Duplicate grid label " .. ws.name .. "; recover the layout before organizing" end
+      names[ws.name] = true
+      if ws.addressable_name and ws.addressable_name ~= ws.name then
+        return "Grid label " .. ws.name .. " differs from address " .. ws.addressable_name .. "; recover the layout before organizing"
+      end
+    end
+  end
+end
+
+-- Expose the read-only safety check to the task adapter and desktop coordinator.
+function hyprgrid.layout_problem()
+  return grid_layout_problem()
 end
 
 -- Name of the focused monitor. I.e. "DP-2".
@@ -137,12 +180,15 @@ end
 -- An explicit column destination takes precedence while that monitor remains connected.
 local function heal_split_columns()
   if healing or relocating then return end
+  if grid_layout_problem() then return end
   healing = true
   local origin = focused_monitor()
+  local active = hl.get_active_workspace()
+  local origin_workspace = active and selector_for_workspace(active)
   -- Per column: how many of its workspaces sit on each monitor, and which monitor holds its home.
   local counts, home_mon = {}, {}
   for _, ws in ipairs(hl.get_workspaces()) do
-    local col, row = cell_of(ws.name)
+    local col, row = workspace_cell(ws)
     if col and ws.monitor then
       counts[col] = counts[col] or {}
       counts[col][ws.monitor.name] = (counts[col][ws.monitor.name] or 0) + 1
@@ -162,9 +208,17 @@ local function heal_split_columns()
     anchor[col] = destination and connected[destination] and destination or best
   end
   for _, ws in ipairs(hl.get_workspaces()) do
-    local col = cell_of(ws.name)
+    local col = workspace_cell(ws)
     if col and ws.monitor and anchor[col] and ws.monitor.name ~= anchor[col] then
       hl.dispatch(hl.dsp.workspace.move({ workspace = selector_for_workspace(ws), monitor = anchor[col] }))
+    end
+  end
+  -- Moving an outlier can surface it over the task already visible on the destination. Restore that
+  -- task only if it survived on the original monitor; never recreate an empty cell disposed by the move.
+  for _, ws in ipairs(hl.get_workspaces()) do
+    if ws.monitor and ws.monitor.name == origin and selector_for_workspace(ws) == origin_workspace then
+      hl.dispatch(hl.dsp.focus({ workspace = origin_workspace }))
+      break
     end
   end
   if origin then hl.dispatch(hl.dsp.focus({ monitor = origin })) end
@@ -196,24 +250,29 @@ local function set_all_to_row(R, origin_col)
   local origin = focused_monitor()
   origin_col = origin_col or current_cell()
   local cols = grid_columns()
+  -- Resolve every destination before changing focus. A corrupted label can be ambiguous, and
+  -- rejecting it after switching monitors would itself leave navigation on the wrong screen.
+  local targets = {}
+  for _, mon in ipairs(hl.get_monitors()) do
+    local col = cell_of(mon.active_workspace and mon.active_workspace.name)
+    if mon.name ~= origin and col and cols[col] then
+      targets[#targets + 1] = { monitor = mon.name, workspace = selector_for(col, R) }
+    end
+  end
+  local origin_target = origin and origin_col and selector_for(origin_col, R)
   syncing = true
   -- Lock-step the OTHER monitors first. A split column's home workspace lives on a different monitor, so
   -- focusing it bounces focus across monitors; doing all that before the focused monitor means the bounce
   -- can't leave the focused monitor stranded on the wrong workspace.
-  for _, mon in ipairs(hl.get_monitors()) do
-    if mon.name ~= origin then
-      local col = cell_of(mon.active_workspace and mon.active_workspace.name)
-      if col and cols[col] then
-        hl.dispatch(hl.dsp.focus({ monitor = mon.name }))
-        hl.dispatch(hl.dsp.focus({ workspace = selector_for(col, R) }))
-      end
-    end
+  for _, target in ipairs(targets) do
+    hl.dispatch(hl.dsp.focus({ monitor = target.monitor }))
+    hl.dispatch(hl.dsp.focus({ workspace = target.workspace }))
   end
   -- Move the focused monitor strictly LAST, re-asserting its workspace explicitly (not just re-focusing
   -- the monitor). Nothing runs after this, so Super+Ctrl+J/K can never drift it off its own column.
-  if origin and origin_col then
+  if origin_target then
     hl.dispatch(hl.dsp.focus({ monitor = origin }))
-    hl.dispatch(hl.dsp.focus({ workspace = selector_for(origin_col, R) }))
+    hl.dispatch(hl.dsp.focus({ workspace = origin_target }))
   end
   syncing = false
 end
@@ -222,15 +281,20 @@ end
 -- row empties, squeeze it out and renumber the higher tags down (c->b, d->c) ACROSS ALL COLUMNS at once,
 -- and shift the shared per-tag descriptions to match (if b was "beta" and b->a, tag a becomes "beta").
 --
--- Renaming a windowed workspace carries its windows, but renaming onto a name that is still on screen makes
--- a DUPLICATE (the "two 2a" bug). So we first PARK every monitor on its home column -- now no grid cell is
--- visible, the empty ones dispose, and the renames below have free targets -- then bring the monitors back
+-- PARK every monitor on its home column so empty destination cells can dispose before windows move into
+-- the canonical target addresses. Display-only renames cannot renumber addresses on Hyprland 0.57.1.
+-- After moving the window groups, bring the monitors back
 -- onto the (now compacted) tag they were on. `closed_cell` preserves the closing column and monitor across
 -- Hyprland's automatic fallback; an emptied active cell returns to its preceding occupied tag, or home.
 -- Event handlers schedule this after Hyprland's
 -- window lifecycle callback returns; workspace mutation from inside CWindow::~CWindow corrupts Hyprland.
 local function reconcile_tags(closed_cell, force_compact)
   if reconciling then return end
+  local problem = grid_layout_problem()
+  if problem then
+    if force_compact then error(problem) end
+    return
+  end
   reconciling = true
 
   -- The standalone grid packs rows; task mode preserves letters unless organize is explicit.
@@ -287,7 +351,7 @@ local function reconcile_tags(closed_cell, force_compact)
     end
   end
 
-  -- park every monitor on its home column so no grid cell stays visible during the renames
+  -- park every monitor on its home column so no old grid cell stays visible during migration
   syncing = true
   for _, m in ipairs(hl.get_monitors()) do
     local col = cell_of(m.active_workspace and m.active_workspace.name)
@@ -297,15 +361,30 @@ local function reconcile_tags(closed_cell, force_compact)
     end
   end
 
-  -- renumber the windowed survivors down, ascending so each target row is already vacated; empty cells at
-  -- these rows just dispose on rename (they carry no windows). Collect the tag remap for the descriptions.
+  -- Hyprland 0.57 rename changes only the display label, leaving name: selectors at the old address.
+  -- Move windows into canonical cell addresses instead. Ascending source rows vacate each target before
+  -- a later row uses it; source cells keep their original address until their final window leaves.
+  local windows = {}
+  for _, window in ipairs(hl.get_windows()) do
+    local ws = window.workspace
+    if ws then
+      local address = ws.addressable_name or ws.name
+      windows[address] = windows[address] or {}
+      table.insert(windows[address], window.address)
+    end
+  end
   local remap = {}
   for _, r in ipairs(orows) do
     if newrow[r] ~= r then
       for _, ws in ipairs(hl.get_workspaces()) do
         local c, row = cell_of(ws.name)
         if row == r then
-          hl.dispatch(hl.dsp.workspace.rename({ workspace = "name:" .. ws.name, name = ws_name_for(c, newrow[r]) }))
+          -- New target workspaces are created on the focused monitor, not the window's source monitor.
+          hl.dispatch(hl.dsp.focus({ monitor = ws.monitor.name }))
+          for _, address in ipairs(windows[ws.addressable_name or ws.name] or {}) do
+            hl.dispatch(hl.dsp.window.move({ window = "address:" .. address,
+              workspace = "name:" .. ws_name_for(c, newrow[r]), follow = false }))
+          end
         end
       end
     end
@@ -320,7 +399,7 @@ local function reconcile_tags(closed_cell, force_compact)
   if #remap > 0 then hl.exec_cmd("hypr-ws-desc remap " .. table.concat(remap, " ")) end
 
   -- Restore the saved column, not whichever home column Hyprland chose during fallback or parking.
-  -- A surviving viewed tag follows its rename; an emptied one returns to the preceding occupied tag.
+  -- A surviving viewed tag follows its window group; an emptied one returns to the preceding occupied tag.
   if force_compact then
     local function restore_view(monitor)
       local view = views[monitor]
@@ -340,7 +419,7 @@ local function reconcile_tags(closed_cell, force_compact)
     hl.dispatch(hl.dsp.focus({ monitor = origin }))
     set_all_to_row(return_row or (frow and (newrow[frow] or math.min(frow, top)) or 1), origin_col)
   end
-  -- A compaction can leave a column split across monitors -- its renames/refocus never move a workspace
+  -- A compaction can leave a column split across monitors -- its window moves/refocus never move a workspace
   -- between monitors, so a column whose home had already drifted stays split -- and nothing else heals on a
   -- window close, so the split would linger until the next login. Consolidate any split column now, so
   -- closing tags never strands one on the wrong monitor.
@@ -466,13 +545,15 @@ local function grid_workspaces()
   for _, ws in ipairs(hl.get_workspaces()) do
     local col, tag = (ws.name or ""):match("^(%d+)(%a*)$")
     if col then
-      list[#list + 1] = { name = ws.name, col = tonumber(col),
+      list[#list + 1] = { name = ws.name, address = ws.addressable_name or tostring(ws.id),
+        selector = selector_for_workspace(ws), col = tonumber(col),
         row = (tag ~= "" and tag:byte(1) - string.byte("a") + 2) or 1 }
     end
   end
   table.sort(list, function(a, b)
     if a.col ~= b.col then return a.col < b.col end
-    return a.row < b.row
+    if a.row ~= b.row then return a.row < b.row end
+    return a.address < b.address
   end)
   return list
 end
@@ -484,13 +565,13 @@ local function walk(delta)
   local cur = hl.get_active_workspace()
   local idx = 1
   for i, ws in ipairs(list) do
-    if cur and ws.name == cur.name then
+    if cur and ws.address == (cur.addressable_name or tostring(cur.id)) then
       idx = i
       break
     end
   end
   local target = list[(idx - 1 + delta) % #list + 1]
-  hl.dispatch(hl.dsp.focus({ workspace = selector_for(tostring(target.col), target.row) }))
+  hl.dispatch(hl.dsp.focus({ workspace = target.selector }))
 end
 
 hl.unbind("SUPER + CTRL + K") -- was Herdr keybindings
@@ -656,6 +737,8 @@ end
 -- A delayed task window may map after its empty target cell disappeared. Rejoin its tool column
 -- using the same tested healing logic as other column moves, then compact the row it left.
 function hyprgrid.route_window(address, workspace, follow)
+  local col, row = cell_of(workspace:gsub("^name:", ""))
+  if col then workspace = selector_for(col, row) end
   hl.dispatch(hl.dsp.window.move({ window = "address:" .. address,
     workspace = workspace, follow = false }))
   heal_split_columns()

@@ -618,3 +618,146 @@ H.scenario("a queued close event cannot override organize's restored task", func
   -- Then the selected task stays visible, rather than following the obsolete h cell.
   H.expect_active("DP-2", "2a")
 end)
+
+H.scenario("organize keeps workspace addresses aligned with grid labels", function()
+  -- Given sparse grid cells on Hyprland 0.57, where rename cannot change their addresses.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2i", "DP-2")
+  Stub.seed_window("2j", "DP-2")
+  -- When organizing the rows.
+  hyprgrid.organize()
+  -- Then every surviving named cell has the address its navigation selector will use.
+  for _, workspace in ipairs(H.hl.get_workspaces()) do
+    if workspace.name:match("^%d+[a-l]$") then H.eq(workspace.addressable_name, workspace.name) end
+  end
+end)
+
+H.scenario("navigation after organize does not recreate the old selector address", function()
+  -- Given a task organized from i to a.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2i", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2i" }))
+  hyprgrid.organize()
+  -- When leaving and returning to a through ordinary navigation.
+  H.press("SUPER + CTRL + J")
+  H.press("SUPER + CTRL + K")
+  -- Then there is still only one workspace displaying each grid label.
+  H.expect_no_duplicates()
+end)
+
+H.scenario("organize rejects an already renamed grid before changing anything else", function()
+  -- Given a legacy organize result with mismatched address and display name.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2i", "DP-2")
+  H.hl.dispatch(H.hl.dsp.workspace.rename({ workspace = "name:2i", name = "2a" }))
+  -- When organization is requested again.
+  local ok = pcall(hyprgrid.organize)
+  -- Then it refuses instead of compounding the corrupted layout.
+  H.eq(ok, false)
+end)
+
+H.scenario("workspace walking can reach distinct workspaces with duplicate display labels", function()
+  -- Given two existing workspaces with the same displayed label but different addresses.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2f", "DP-2")
+  Stub.seed_window("2j", "DP-2")
+  H.hl.dispatch(H.hl.dsp.workspace.rename({ workspace = "name:2f", name = "2e" }))
+  H.hl.dispatch(H.hl.dsp.workspace.rename({ workspace = "name:2j", name = "2e" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2f" }))
+  -- When walking to the next existing workspace.
+  H.press("SUPER + CTRL + L")
+  -- Then it selects the other real address, not a third empty workspace called 2e.
+  H.eq(H.hl.get_active_workspace().addressable_name, "2j")
+end)
+
+H.scenario("automatic healing does not rearrange an already corrupted grid", function()
+  -- Given a renamed grid cell and another cell on a different monitor.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2i", "DP-2")
+  H.hl.dispatch(H.hl.dsp.workspace.rename({ workspace = "name:2i", name = "2a" }))
+  Stub.seed_window("2b", "HDMI-A-1")
+  -- When a monitor event queues the normal split healer.
+  Stub.add_monitor("DP-3", 7680)
+  H.timers()
+  -- Then it leaves the existing monitor placements alone for deliberate recovery.
+  H.eq(H.workspaces()["2b"].mon, "HDMI-A-1")
+end)
+
+H.scenario("a second organize preserves window identity after another gap opens", function()
+  -- Given two window groups already organized once.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  local first = Stub.seed_window("2i", "DP-2")
+  local second = Stub.seed_window("2j", "DP-2")
+  hyprgrid.organize()
+  -- And a later row, with the first group now closed.
+  Stub.seed_window("2f", "DP-2")
+  H.close(first)
+  H.timers()
+  -- When organizing a second time.
+  hyprgrid.organize()
+  -- Then the original second window is reachable at the new canonical a address.
+  for _, window in ipairs(H.hl.get_windows()) do
+    if window.address == second then H.eq(window.workspace.addressable_name, "2a") end
+  end
+end)
+
+H.scenario("an invalid navigation target is rejected before changing monitor focus", function()
+  -- Given a windowed 2b at address 2c and an empty duplicate on another monitor.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2c", "DP-2")
+  H.hl.dispatch(H.hl.dsp.workspace.rename({ workspace = "name:2c", name = "2b" }))
+  H.hl.dispatch(H.hl.dsp.focus({ monitor = "HDMI-A-1" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2b" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2c" }))
+  -- When a row jump would reuse address 2c for a different label.
+  pcall(function() H.press("SUPER + CTRL + J") end)
+  -- Then the rejected jump does not strand focus on the duplicate's monitor.
+  H.expect_focused("DP-2")
+end)
+
+H.scenario("the task submap has no manual column-healing shortcut", function()
+  -- Given the task adapter.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  -- When entering task mode.
+  H.press("SUPER + T")
+  -- Then monitor healing needs no task action.
+  H.eq(Stub.S().binds["hyprgrid-tasks:m"], nil)
+end)
+
+H.scenario("ordinary row navigation reaches c from b after organization", function()
+  -- Given three sparse window groups and no managed reservations.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2a", "DP-1")
+  Stub.seed_window("2f", "DP-1")
+  Stub.seed_window("2i", "DP-1")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2f" }))
+  -- When organizing f to b, then navigating normally to the following row.
+  hyprgrid.organize()
+  H.press("SUPER + CTRL + J")
+  -- Then the original i group is reachable through the canonical c address.
+  H.eq(H.hl.get_active_workspace().addressable_name, "2c")
+end)
+
+H.scenario("automatic majority healing still runs after organization", function()
+  -- Given three organized window groups on DP-1.
+  H.boot()
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2a", "DP-1")
+  Stub.seed_window("2f", "DP-1")
+  Stub.seed_window("2i", "DP-1")
+  hyprgrid.organize()
+  -- When one group drifts after organization and the move handler runs.
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:2c", monitor = "DP-2" }))
+  H.timers()
+  -- Then c automatically rejoins its column on DP-1.
+  H.eq(H.workspaces()["2c"].mon, "DP-1")
+end)

@@ -14,8 +14,10 @@ rows (`a–l`). No agent orchestration, PR tracking, or desktop-session restorat
   new/restored tasks claim the first available slot without compacting other rows.
 - `Super+T → o` explicitly organizes all surviving rows into consecutive letters,
   preserving order, task identity, descriptions, and each monitor's viewed task.
-  Reserved tasks without windows still occupy a slot; numeric home workspaces do not
-  renumber. Automatic compaction stays disabled afterward.
+  First archive active desktop-only tasks with no windows, checkout, or agent session.
+  Keep their metadata for restore. Tasks with checkouts, sessions, or setup in progress
+  retain their reservations; numeric home workspaces do not renumber. Automatic
+  compaction stays disabled afterward.
 - Record its name, optional source repository and jj workspace name/path, resumable OpenCode
   session reference, optional active row, and attention/snooze state.
 - Keep task metadata outside checkouts. Archived tasks remain discoverable without

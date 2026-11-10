@@ -151,3 +151,50 @@ H.scenario("an output layout change clears the explicit column destination", fun
   -- Then the normal home tie-breaker applies again.
   H.eq((H.workspaces())["1a"].mon, "DP-1", "layout change restores normal healing")
 end)
+
+H.scenario("automatic column healing selects DP-1 when it holds the majority", function()
+  -- Given column 2 split between DP-1 and its home on DP-2.
+  local Stub = require("stub.hyprland")
+  H.boot()
+  Stub.seed_window("2a", "DP-1")
+  Stub.seed_window("2b", "DP-1")
+  Stub.seed_window("2d", "DP-1")
+  Stub.seed_window("2c", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2a" }))
+  -- When a stray workspace move queues automatic healing.
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:2c", monitor = "HDMI-A-1" }))
+  H.timers()
+  -- Then the stray cell joins the majority, not a fixed column-to-monitor assignment.
+  H.eq(H.workspaces()["2c"].mon, "DP-1")
+end)
+
+H.scenario("automatic column healing selects DP-2 when that monitor holds the majority", function()
+  -- Given the same column with a different majority monitor.
+  local Stub = require("stub.hyprland")
+  H.boot()
+  Stub.seed_window("2a", "DP-2")
+  Stub.seed_window("2b", "DP-2")
+  Stub.seed_window("2c", "DP-1")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2c" }))
+  -- When a stray workspace move queues automatic healing.
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:2c", monitor = "HDMI-A-1" }))
+  H.timers()
+  -- Then the stray cell rejoins DP-2.
+  H.eq(H.workspaces()["2c"].mon, "DP-2")
+end)
+
+H.scenario("automatic healing does not hide the viewed task behind a drifted home", function()
+  -- Given the terminal column's tasks on DP-1 and its home on DP-2.
+  local Stub = require("stub.hyprland")
+  H.boot()
+  Stub.seed_window("2a", "DP-1")
+  Stub.seed_window("2b", "DP-1")
+  Stub.seed_window("2c", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2b" }))
+  -- When the last task rejoins DP-1 and automatic healing brings its home too.
+  H.hl.dispatch(H.hl.dsp.workspace.move({ workspace = "name:2c", monitor = "DP-1" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2b" }))
+  H.timers()
+  -- Then the user is still viewing b, not home or whichever workspace moved last.
+  H.expect_active("DP-1", "2b")
+end)

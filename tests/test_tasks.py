@@ -109,14 +109,35 @@ class TaskLauncher:
 
 
 class OrganizingDesktop:
-    """Model the compositor renumbering a task whose prefix metadata is still queued."""
+    """Keep row windows and compositor-owned reservations behind the desktop boundary."""
 
-    def __init__(self, store):
+    def __init__(self, store, windows=None):
         self.store = store
+        self.windows = {"late": ["0x123"]} if windows is None else windows
+        self.layout_problem = None
+
+    def check_layout(self):
+        """Model the read-only preflight that prevents pruning a damaged grid."""
+        if self.layout_problem:
+            raise TaskError(self.layout_problem)
+
+    def clients(self, task):
+        """Return every surviving window belonging to the task's row."""
+        return self.windows.get(task["id"], [])
+
+    def release(self, task):
+        """Release only empty rows, without changing other tasks' reservations."""
+        if self.clients(task):
+            raise TaskError("Task still has open windows")
+        rows = self.store.rows()
+        del rows[task["id"]]
+        (self.store.path / "rows.tsv").write_text("".join(f"{task_id}\t{row}\n" for task_id, row in rows.items()))
 
     def organize(self):
-        """Move the already-assigned task from i to a without changing its identity."""
-        (self.store.path / "rows.tsv").write_text("late\t2\n")
+        """Pack the remaining reservations in their original row order."""
+        rows = self.store.rows()
+        tasks = sorted(rows, key=rows.get)
+        (self.store.path / "rows.tsv").write_text("".join(f"{task_id}\t{row}\n" for row, task_id in enumerate(tasks, 2)))
 
 
 class TaskWorkspacesTest(unittest.TestCase):
@@ -983,6 +1004,83 @@ class TaskWorkspacesTest(unittest.TestCase):
             main()
         # Then the same task identity has the compacted row.
         self.assertEqual(self.store.rows(), {"late": 2})
+
+    def test_organize_archives_empty_desktop_only_tasks(self):
+        # Given an empty desktop task without a checkout or agent session.
+        (self.store.path / "rows.tsv").write_text("empty\t4\n")
+        self.manager.ensure_task("empty")
+        self.manager.desktop = OrganizingDesktop(self.store, windows={})
+        # When explicitly organizing.
+        self.manager.organize()
+        # Then the task is archived, retaining its metadata for restore.
+        self.assertEqual(self.store.get("empty")["state"], "archived")
+
+    def test_organize_reclaims_the_empty_task_slot_before_compacting(self):
+        # Given an empty c reservation between populated b and d tasks.
+        (self.store.path / "rows.tsv").write_text("first\t2\nsecond\t3\nempty\t4\nsurvivor\t5\n")
+        self.manager.desktop = OrganizingDesktop(self.store, windows={
+            "first": ["0x123"], "second": ["0x234"], "survivor": ["0x456"],
+        })
+        # When organizing before the prefix's metadata commands have finished.
+        self.manager.organize()
+        # Then d reclaims c while the earlier tasks keep their letters.
+        self.assertEqual(self.store.rows(), {"first": 2, "second": 3, "survivor": 4})
+
+    def test_organize_preserves_desktop_tasks_with_windows(self):
+        # Given a desktop-only task that still has a row window.
+        (self.store.path / "rows.tsv").write_text("occupied\t4\n")
+        self.manager.ensure_task("occupied")
+        self.manager.desktop = OrganizingDesktop(self.store, windows={"occupied": ["0x456"]})
+        # When organizing.
+        self.manager.organize()
+        # Then the populated task remains active.
+        self.assertEqual(self.store.get("occupied")["state"], "active")
+
+    def test_organize_preserves_empty_tasks_with_a_checkout(self):
+        # Given an empty task with an attached checkout but no agent session.
+        (self.store.path / "rows.tsv").write_text("checkout\t4\n")
+        task = self.manager.ensure_task("checkout")
+        self.manager.attach_checkout(task, self.repo)
+        self.manager.desktop = OrganizingDesktop(self.store, windows={})
+        # When organizing.
+        self.manager.organize()
+        # Then the checkout's reservation remains intact.
+        self.assertEqual(self.store.rows(), {"checkout": 2})
+
+    def test_organize_preserves_empty_tasks_with_an_agent_session(self):
+        # Given an empty task with an agent session recorded independently of its checkout.
+        (self.store.path / "rows.tsv").write_text("agent\t4\n")
+        task = self.manager.ensure_task("agent")
+        self.agent.ensure_session(task, self.store)
+        self.manager.desktop = OrganizingDesktop(self.store, windows={})
+        # When organizing.
+        self.manager.organize()
+        # Then the agent's reservation remains intact.
+        self.assertEqual(self.store.rows(), {"agent": 2})
+
+    def test_organize_preserves_setup_reservations(self):
+        # Given an empty task whose setup has not finished.
+        (self.store.path / "rows.tsv").write_text("preparing\t4\n")
+        task = self.manager.ensure_task("preparing")
+        task["state"] = "preparing"
+        self.store.save(task)
+        self.manager.desktop = OrganizingDesktop(self.store, windows={})
+        # When organizing.
+        self.manager.organize()
+        # Then setup keeps its reservation.
+        self.assertEqual(self.store.rows(), {"preparing": 2})
+
+    def test_organize_checks_layout_before_archiving_empty_tasks(self):
+        # Given an empty task whose layout cannot safely resolve task ownership.
+        (self.store.path / "rows.tsv").write_text("empty\t4\n")
+        self.manager.ensure_task("empty")
+        self.manager.desktop = OrganizingDesktop(self.store, windows={})
+        self.manager.desktop.layout_problem = "Grid label differs from its address"
+        # When organization rejects that layout.
+        with self.assertRaisesRegex(TaskError, "Grid label differs"):
+            self.manager.organize()
+        # Then no task has been archived as a side effect.
+        self.assertEqual(self.store.get("empty")["state"], "active")
 
 
 if __name__ == "__main__":

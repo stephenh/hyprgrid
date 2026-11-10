@@ -35,7 +35,8 @@ tests/
 ## How the fake works
 
 `stub/hyprland.lua` keeps an in-memory model — monitors (each shows one active workspace), workspaces
-(name, id, monitor, window count, persistent flag), windows, and per-tag descriptions — and implements the
+(display name, stable address, optional numbered id, monitor, window count, persistent flag), windows,
+and per-tag descriptions — and implements the
 slice of the `hl`/`o` API the grid uses (`get_workspaces`, `get_monitors`, `dispatch`,
 `dsp.focus/workspace.move/workspace.rename/window.move`, `workspace_rule`, `bind`, `on`, `timer`, `o.bind`, …).
 
@@ -60,6 +61,9 @@ These live as tests in `tests/hyprland_behaviors.lua` — the stub is only usefu
   the callback returns.
 - **Focusing a workspace that doesn't exist creates it** on the focused monitor.
 - **Renaming onto an existing name produces a duplicate** — the "two `2a` workspaces" disaster.
+- **Hyprland 0.57.1 rename changes only the display name.** `name:2i` continues to select address `2i`
+  after its display name becomes `2a`; focusing `name:2a` can create a second workspace displaying `2a`.
+  Window membership and monitor visibility follow the stable address, not the label.
 - **Renaming drops the (name-keyed) persistent rule**, so renaming an *empty* workspace disposes it; a
   *windowed* one survives (its window follows).
 - `workspace_rule{persistent=true}` creates the workspace if missing; `{persistent=false}` disposes it if
@@ -77,12 +81,20 @@ right," still smoke-test a risky change on real windows, and when a new real beh
 
 ## Row-wise tag compaction (built here, tested, live)
 
-`reconcile_tags` implements it after a short deferred timer: when a tag row is empty in every column, it's
-squeezed out and the higher tags renumber down across all columns, with the shared per-tag descriptions shifting to match. The duplicate-`2a`
-collision that destroyed the live session is reproduced in `tests/compaction.lua` ("compacting the tag you're
-VIEWING") and prevented — before renaming, every monitor is parked on its home column so no empty cell is on
-screen to collide with a rename target. The description shift shells out to `hypr-ws-desc remap OLD=NEW …`
+`reconcile_tags` implements it after a short deferred timer in standalone mode, or explicitly through
+organize in task mode. Rows are packed across all columns, with shared descriptions shifting to match.
+Every monitor is first parked on its home column, then address-verified windows are moved into canonical
+target cells in ascending source-row order. **Do not use workspace display renames for compaction:**
+Hyprland 0.57.1 keeps the old selector addresses, which broke navigation after the original organizer.
+The description shift shells out to `hypr-ws-desc remap OLD=NEW …`
 (a subcommand added to `~/.local/bin/hypr-ws-desc`).
+
+The address/display distinction is verified against the running 0.57.1 source:
+`src/state/workspace/Resolver.cpp`, `src/workspace/HLWorkspace.cpp`, and
+`src/config/lua/objects/LuaWorkspace.cpp`. The stub now exposes `addressable_name` and keeps window/monitor
+membership by that address. Organization refuses existing mismatched/duplicate labels, and automatic
+healing leaves such layouts untouched. Recovery of an already affected live session is a separate,
+user-directed operation, never a side effect of reload or a test.
 
 ## Why not a real headless Hyprland in Docker (what we tried)
 

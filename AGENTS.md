@@ -2,6 +2,18 @@
 
 Read [CLAUDE.md](CLAUDE.md) for the grid development workflow and live-session restrictions.
 
+## Hyprland 0.57.1 workspace addresses are not display names
+
+- Lua `workspace.name` is a display label. `workspace.addressable_name` is the stable selector key.
+- `hl.dsp.workspace.rename` changes only the label; it does not change the key used by `name:...`.
+  The initial organizer renamed labels and caused duplicate labels, broken navigation, and bad monitor moves.
+- Compact by moving address-verified windows into canonical cells, not by renaming workspace labels.
+- Never automatically repair an already affected live layout. The grid must refuse organization and
+  skip automatic healing when addresses and labels disagree. Workspace walking uses actual addresses
+  so distinct workspaces remain reachable even if their labels collide.
+- Majority-monitor alignment is automatic, not a task-submap recovery action. Preserve the viewed
+  workspace when moving outliers onto its monitor; gathering a column must not hide its current task.
+
 ## Bar plugin changes: verify the running code before diagnosing another bug
 
 The source is `quattro/hyprgrid.workspaces/Workspaces.qml`; the installed copy is

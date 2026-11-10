@@ -20,7 +20,7 @@ def main():
     listing = commands.add_parser("list", help="List tasks (including archived tasks)")
     listing.add_argument("--json", action="store_true")
     commands.add_parser("repos", help="List discovered jj repositories")
-    commands.add_parser("organize", help="Close gaps and renumber desktop task rows in their current order")
+    commands.add_parser("organize", help="Archive empty desktop-only tasks, then close gaps in row order")
     auto_archive = commands.add_parser("archive-empty", help="Archive a desktop task if its row is empty")
     auto_archive.add_argument("task")
     ensure = commands.add_parser("ensure-task", help="Publish metadata for a compositor-assigned task")

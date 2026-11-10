@@ -241,13 +241,18 @@ class Manager:
         self.store.save(task)
 
     def organize(self):
-        """Preserve pending task names before asking the compositor to close row gaps."""
+        """Archive empty desktop-only tasks, then compact surviving rows without losing names."""
         if not self.desktop:
             raise TaskError("Organize requires a Hyprland desktop session")
+        self.desktop.check_layout()
         # A just-pressed prefix may not have published its task metadata yet. Capture
         # its original description before row assignments and description keys change.
         for task_id in self.store.rows():
-            self.ensure_task(task_id)
+            task = self.ensure_task(task_id)
+            # Prefix promotion can reserve a row that never had a window-close event. Explicit
+            # organize can reclaim it, but must not stop an agent or tear down a checkout to do so.
+            if task["state"] == "active" and not task.get("path") and not task.get("session"):
+                self.archive_if_empty(task)
         self.desktop.organize()
 
     def create(self, repo, name=None, desktop=False, existing=False, adopt_window=None):

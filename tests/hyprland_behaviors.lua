@@ -135,3 +135,47 @@ H.scenario("behavior: window.destroy can deliver nil after the weak reference ex
   -- Then Lua receives nil, not a window object.
   H.eq(destroyed, nil)
 end)
+
+H.scenario("behavior: Hyprland 0.57 rename changes display name but keeps the address", function()
+  -- Given a windowed named workspace.
+  H.boot_bare()
+  H.open("2i")
+  -- When changing its display name.
+  hl.dispatch(hl.dsp.workspace.rename({ workspace = "name:2i", name = "2a" }))
+  -- Then its addressable identity remains 2i.
+  H.eq(hl.get_workspaces()[#hl.get_workspaces()].addressable_name, "2i")
+end)
+
+H.scenario("behavior: name selectors resolve the address rather than the display name", function()
+  -- Given a renamed workspace whose address still says 2i.
+  H.boot_bare()
+  H.open("2i")
+  hl.dispatch(hl.dsp.workspace.rename({ workspace = "name:2i", name = "2a" }))
+  -- When focusing its original address.
+  hl.dispatch(hl.dsp.focus({ workspace = "name:2i" }))
+  -- Then it shows the renamed workspace, not a newly created empty 2i.
+  H.expect_active("DP-1", "2a")
+end)
+
+H.scenario("behavior: focusing a renamed display label can create a duplicate", function()
+  -- Given a workspace at address 2i displayed as 2a.
+  H.boot_bare()
+  H.open("2i")
+  hl.dispatch(hl.dsp.workspace.rename({ workspace = "name:2i", name = "2a" }))
+  -- When focusing name:2a, which is a different address.
+  hl.dispatch(hl.dsp.focus({ workspace = "name:2a" }))
+  -- Then there are two distinct workspaces displaying 2a.
+  local _, duplicates = H.workspaces()
+  H.eq(duplicates["2a"], true)
+end)
+
+H.scenario("behavior: repeated renames still address the original workspace key", function()
+  -- Given a workspace at address 2i displayed as 2a.
+  H.boot_bare()
+  H.open("2i")
+  hl.dispatch(hl.dsp.workspace.rename({ workspace = "name:2i", name = "2a" }))
+  -- When renaming it again through the same address.
+  hl.dispatch(hl.dsp.workspace.rename({ workspace = "name:2i", name = "2b" }))
+  -- Then the same workspace now displays 2b.
+  H.expect_windows("2b", 1)
+end)

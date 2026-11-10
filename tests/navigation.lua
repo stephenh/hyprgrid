@@ -84,3 +84,28 @@ H.scenario("managed task release refuses a row with surviving windows", function
   -- Then its reservation remains.
   H.eq(hyprgrid.rows["task-one"], 2)
 end)
+
+H.scenario("Super+0 reaches numbered workspace 10 displayed as 0 from home 2", function()
+  -- Given home 2 and the roam workspace on the same monitor.
+  local Stub = require("stub.hyprland")
+  H.boot({ { name = "DP-1", x = 0, home = "2" } })
+  Stub.seed_window("0", "DP-1", 10)
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "2" }))
+  -- When using the ordinary Super+0 shortcut.
+  H.press("SUPER + code:19")
+  -- Then it selects the numbered ID, regardless of its display label.
+  H.eq(H.hl.get_active_workspace().id, 10)
+end)
+
+H.scenario("Super+0 falls back to roam when its matching task cell is absent", function()
+  -- Given a remembered task row with no matching roam cell.
+  local Stub = require("stub.hyprland")
+  H.boot()
+  Stub.seed_window("0", "DP-1", 10)
+  Stub.seed_window("2c", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2c" }))
+  -- When switching to the roam column.
+  H.press("SUPER + code:19")
+  -- Then it reaches numbered workspace 10 instead of rejecting its display name.
+  H.eq(H.hl.get_active_workspace().id, 10)
+end)

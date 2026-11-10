@@ -165,7 +165,7 @@ return function(options)
     hl.dispatch(hl.dsp.submap("hyprgrid-tasks"))
     local ws = hl.get_active_workspace()
     local letter = ws and ws.name:match("^%d+([a-l])$")
-    if letter then
+    if letter and not hyprgrid.layout_problem() then
       local id
       for candidate, row in pairs(hyprgrid.rows) do
         if row == letter:byte() - string.byte("a") + 2 then id = candidate; break end

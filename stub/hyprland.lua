@@ -1,5 +1,5 @@
 -- StubHyprland: a fake `hl` / `o` API backed by an in-memory model that behaves the way real Hyprland
--- (0.55, Aquamarine) was observed to behave while debugging the grid. It exists so workspace-grid.lua can
+-- (0.57.1, Aquamarine) was observed to behave while debugging the grid. It exists so workspace-grid.lua can
 -- be driven through user scenarios and asserted on, with zero risk to a live session.
 --
 -- Modeled behaviors (each learned the hard way on the real thing):
@@ -9,8 +9,8 @@
 --     (i.e. are not the active workspace of any monitor). Disposal fires `workspace.removed`.
 --   * Closing the last window on a visible grid workspace falls back to its numbered home before
 --     `window.destroy` fires, while `window.close` can still identify the workspace being closed.
---   * Numbered home workspaces ("1".."10") get positive ids; named grid tags ("2a") get negative ids --
---     which is why a negative number is NOT a usable id selector (it reads as a relative offset).
+--   * Numbered workspaces have positive IDs. Named workspaces have stable addressable names and no
+--     numeric ID; their display name can change without changing what a name: selector resolves.
 --   * Focusing a workspace that does not exist CREATES it (empty) on the focused monitor.
 --   * Focusing a workspace that lives on another monitor moves focus to that monitor.
 --   * Renaming a workspace onto a name that already exists produces a DUPLICATE (two same-named ws).
@@ -36,9 +36,9 @@ local S -- the whole compositor model; (re)created by Stub.reset
 -- unless `home` given. I.e. Stub.reset({ {name="DP-1", x=0}, {name="DP-2", x=2560} }).
 function Stub.reset(monitors)
   S = {
-    monitors = {},   -- array of { name, x, y, focused, active } (active = workspace name shown)
-    workspaces = {}, -- array of { name, id, monitor, windows, persistent }
-    windows = {},    -- array of { addr, ws }
+    monitors = {},   -- array of { name, x, y, focused, active } (active = workspace address)
+    workspaces = {}, -- array of { name, address, id, monitor, windows, persistent }
+    windows = {},    -- array of { addr, ws } (ws = stable workspace address)
     binds = {},      -- normalized-keys -> callback
     submap = "reset",
     defining_submap = "reset",
@@ -74,6 +74,16 @@ function Stub._find(name)
   for _, w in ipairs(S.workspaces) do if w.name == name then return w end end
 end
 
+function Stub._find_address(address)
+  for _, w in ipairs(S.workspaces) do if w.address == address then return w end end
+end
+
+-- Lua exposes a display label separately from the stable selector key (Hyprland 0.57.1).
+local function workspace_ref(w)
+  if not w then return nil end
+  return { name = w.name, addressable_name = w.address, id = w.id > 0 and w.id or nil }
+end
+
 -- Every workspace with this name (there can be >1 after a rename collision -- modeled on purpose).
 local function find_all(name)
   local out = {}
@@ -84,19 +94,19 @@ end
 function Stub._create(name, monitor, persistent)
   local id
   if is_numbered(name) then id = tonumber(name) else id = S.next_named_id; S.next_named_id = S.next_named_id - 1 end
-  local w = { name = name, id = id, monitor = monitor, windows = 0, persistent = persistent or false }
+  local w = { name = name, address = name, id = id, monitor = monitor, windows = 0, persistent = persistent or false }
   S.workspaces[#S.workspaces + 1] = w
   return w
 end
 
-local function count_windows(name)
+local function count_windows(address)
   local n = 0
-  for _, win in ipairs(S.windows) do if win.ws == name then n = n + 1 end end
+  for _, win in ipairs(S.windows) do if win.ws == address then n = n + 1 end end
   return n
 end
 
-local function is_visible(name)
-  for _, m in ipairs(S.monitors) do if m.active == name then return true end end
+local function is_visible(address)
+  for _, m in ipairs(S.monitors) do if m.active == address then return true end end
   return false
 end
 
@@ -122,8 +132,8 @@ local function gc()
   while again do
     again = false
     for _, w in ipairs(S.workspaces) do
-      w.windows = count_windows(w.name)
-      if w.windows == 0 and not w.persistent and not is_visible(w.name) then
+      w.windows = count_windows(w.address)
+      if w.windows == 0 and not w.persistent and not is_visible(w.address) then
         dispose(w); again = true; break
       end
     end
@@ -132,7 +142,7 @@ end
 
 -- Keep window counts on workspace objects in sync (they are what get_workspaces reports).
 local function refresh_counts()
-  for _, w in ipairs(S.workspaces) do w.windows = count_windows(w.name) end
+  for _, w in ipairs(S.workspaces) do w.windows = count_windows(w.address) end
 end
 
 -- Interpret the side-effecting shell-outs the grid makes. Only "hypr-ws-desc remap OLD=NEW ..." affects the
@@ -157,22 +167,21 @@ local function focus_monitor(name)
   local prev_active = prev and prev.active
   for _, m in ipairs(S.monitors) do m.focused = (m.name == name) end
   local now = focused_monitor()
-  if now and now.active ~= prev_active then fire("workspace.active", { name = now.active }) end
+  if now and now.active ~= prev_active then fire("workspace.active", workspace_ref(Stub._find_address(now.active))) end
 end
 
 -- Show workspace `name` on the focused monitor, moving focus to its monitor if it lives elsewhere, and
 -- creating it (empty, on the focused monitor) if it does not exist. Then GC whatever we uncovered.
-local function focus_workspace(name)
-  local w = Stub._find(name)
+local function focus_workspace(address)
+  local w = Stub._find_address(address)
   local fm = focused_monitor()
   if not w then
-    w = Stub._create(name, fm.name)
+    w = Stub._create(address, fm.name)
   end
   -- move focus to the workspace's monitor and surface it there
   focus_monitor(w.monitor)
-  local m = Stub._find(w.monitor) and nil -- (monitor lookup below)
-  for _, mm in ipairs(S.monitors) do if mm.name == w.monitor then mm.active = name end end
-  fire("workspace.active", { name = name })
+  for _, mm in ipairs(S.monitors) do if mm.name == w.monitor then mm.active = w.address end end
+  fire("workspace.active", workspace_ref(w))
   gc()
 end
 
@@ -187,14 +196,14 @@ local function resolve(sel)
   if nm then
     -- Hyprland 0.57's workspace Resolver.cpp explicitly rejects numeric name: selectors.
     assert(not nm:match("^%d+$"), "Invalid workspace: name: cannot name a workspace with a number")
-    return Stub._find(nm)
+    return Stub._find_address(nm)
   end
   if sel:match("^%d+$") then
     local id = tonumber(sel)
     for _, w in ipairs(S.workspaces) do if w.id == id then return w end end
     return nil
   end
-  return Stub._find(sel)
+  return Stub._find_address(sel)
 end
 
 -- hl.dsp.* return opaque descriptors; hl.dispatch interprets them against the model.
@@ -207,22 +216,22 @@ local function apply(desc)
       focus_monitor(desc.monitor)
     elseif desc.workspace then
       local ws = resolve(desc.workspace)
-      focus_workspace(ws and ws.name or desc.workspace:gsub("^name:", ""))
+      focus_workspace(ws and ws.address or desc.workspace:gsub("^name:", ""))
     end
   elseif op == "ws_move" then -- moveworkspacetomonitor
     local w = resolve(desc.workspace)
     if w then
-      local was_global_active = (focused_monitor() and focused_monitor().active == w.name)
+      local was_global_active = (focused_monitor() and focused_monitor().active == w.address)
       -- if the monitor it left now shows nothing meaningful, give it another/ fresh workspace
       local old = w.monitor
       w.monitor = desc.monitor
       -- surface the moved workspace on its new monitor
-      for _, mm in ipairs(S.monitors) do if mm.name == desc.monitor then mm.active = w.name end end
+      for _, mm in ipairs(S.monitors) do if mm.name == desc.monitor then mm.active = w.address end end
       -- the old monitor needs an active workspace that still lives on it
       for _, mm in ipairs(S.monitors) do
-        if mm.name == old and mm.active == w.name then
+        if mm.name == old and mm.active == w.address then
           local repl
-          for _, x in ipairs(S.workspaces) do if x.monitor == old and x.name ~= w.name then repl = x.name; break end end
+          for _, x in ipairs(S.workspaces) do if x.monitor == old and x.address ~= w.address then repl = x.address; break end end
           if not repl then repl = old:match("%d") and old or "1"; if not Stub._find(repl) then Stub._create(repl, old) end end
           mm.active = repl
         end
@@ -233,14 +242,10 @@ local function apply(desc)
     end
   elseif op == "ws_rename" then
     if S.destroying_window then error("workspace rename dispatched during window.destroy") end
-    local w = Stub._find(desc.workspace)
+    local w = resolve(desc.workspace)
     if w then
-      local old = w.name
       w.name = desc.newname
-      w.id = is_numbered(desc.newname) and tonumber(desc.newname) or w.id
       w.persistent = false -- rules are name-keyed; the old name's persistent rule no longer applies
-      for _, win in ipairs(S.windows) do if win.ws == old then win.ws = desc.newname end end -- windows follow
-      for _, mm in ipairs(S.monitors) do if mm.active == old then mm.active = desc.newname end end -- visibility follows
       refresh_counts()
       gc() -- an empty just-renamed (now non-persistent) workspace disposes here
     end
@@ -251,9 +256,9 @@ local function apply(desc)
         for _, x in ipairs(S.windows) do if x.ws == fm.active then return x end end
       end)()
     if win then
-      if not Stub._find(desc.workspace) then Stub._create(desc.workspace, win_monitor(win)) end
-      win.ws = desc.workspace
-      if desc.follow ~= false then focus_workspace(desc.workspace) end
+      local target = resolve(desc.workspace) or Stub._create(desc.workspace:gsub("^name:", ""), focused_monitor().name)
+      win.ws = target.address
+      if desc.follow ~= false then focus_workspace(target.address) end
       refresh_counts(); gc()
     end
   end
@@ -261,7 +266,7 @@ end
 
 -- monitor a window currently lives on (via its workspace)
 function win_monitor(win)
-  local w = Stub._find(win.ws)
+  local w = Stub._find_address(win.ws)
   return w and w.monitor or focused_monitor().name
 end
 
@@ -285,10 +290,10 @@ hl.dsp = {
   submap = function(name) return { op = "submap", name = name } end,
   workspace = {
     move = function(a) return { op = "ws_move", workspace = norm(a.workspace), monitor = a.monitor } end,
-    rename = function(a) return { op = "ws_rename", workspace = sel_name(a.workspace), newname = sel_name(a.name) } end,
+    rename = function(a) return { op = "ws_rename", workspace = norm(a.workspace), newname = tostring(a.name) } end,
   },
   window = {
-    move = function(a) return { op = "win_move", workspace = sel_name(a.workspace), window = a.window, follow = a.follow } end,
+    move = function(a) return { op = "win_move", workspace = norm(a.workspace), window = a.window, follow = a.follow } end,
   },
 }
 
@@ -302,7 +307,7 @@ function hl.get_workspaces()
   local out = {}
   for _, w in ipairs(S.workspaces) do
     out[#out + 1] = {
-      name = w.name, id = w.id, windows = w.windows, is_persistent = w.persistent,
+      name = w.name, addressable_name = w.address, id = w.id > 0 and w.id or nil, windows = w.windows, is_persistent = w.persistent,
       is_empty = (w.windows == 0), monitor = { name = w.monitor },
     }
   end
@@ -314,7 +319,7 @@ function hl.get_windows()
   for _, win in ipairs(S.windows) do
     windows[#windows + 1] = { address = win.addr, class = win.class, initial_class = win.class,
       title = win.title, initial_title = win.title,
-      workspace = { name = win.ws } }
+      workspace = workspace_ref(Stub._find_address(win.ws)) }
   end
   return windows
 end
@@ -324,7 +329,7 @@ function hl.get_monitors()
   for _, m in ipairs(S.monitors) do
     out[#out + 1] = {
       name = m.name, x = m.x, y = m.y, focused = m.focused, width = 1920, height = 1080,
-      active_workspace = { name = m.active },
+      active_workspace = workspace_ref(Stub._find_address(m.active)),
     }
   end
   return out
@@ -332,8 +337,8 @@ end
 
 function hl.get_active_workspace()
   local m = focused_monitor()
-  local ws = m and Stub._find(m.active)
-  return ws and { name = ws.name, id = ws.id } or nil
+  local ws = m and Stub._find_address(m.active)
+  return workspace_ref(ws)
 end
 
 function hl.bind(keys, cb, _opts)
@@ -360,7 +365,7 @@ function hl.monitor(_spec) end -- test sets up monitors via Stub.reset; ignore c
 -- the workspace if it is empty and not visible.
 function hl.workspace_rule(spec)
   local name = sel_name(spec.workspace)
-  local w = Stub._find(name)
+  local w = Stub._find_address(name)
   if spec.persistent then
     if not w then w = Stub._create(name, spec.monitor or focused_monitor().name, true) else w.persistent = true end
   else
@@ -387,10 +392,10 @@ Stub.get_desc = function(key) return S.desc[key] end
 Stub.seed_window = function(ws, monitor, id)
   local w = Stub._find(ws)
   if not w then w = Stub._create(ws, monitor or focused_monitor().name) end
-  if id then w.id = id end -- model a numbered ws renamed via default_name (id 10 shown as "0")
+  if id then w.id = id; w.address = tostring(id) end -- numbered ID 10 displayed as "0"
   S.next_addr = S.next_addr + 1
   local addr = string.format("0x%x", S.next_addr)
-  S.windows[#S.windows + 1] = { addr = addr, ws = ws }
+  S.windows[#S.windows + 1] = { addr = addr, ws = w.address }
   refresh_counts()
   return addr
 end
@@ -406,13 +411,13 @@ Stub.run_timers = function()
 end
 Stub.open_window = function(ws, class, title)
   ws = ws or (focused_monitor() and focused_monitor().active)
-  if not Stub._find(ws) then Stub._create(ws, focused_monitor().name) end -- a window creates its workspace
+  local workspace = Stub._find_address(ws) or Stub._create(ws, focused_monitor().name)
   S.next_addr = S.next_addr + 1
   local addr = string.format("0x%x", S.next_addr)
-  S.windows[#S.windows + 1] = { addr = addr, ws = ws, class = class, title = title }
+  S.windows[#S.windows + 1] = { addr = addr, ws = workspace.address, class = class, title = title }
   refresh_counts()
   fire("window.open", { address = addr, class = class, initial_class = class,
-    title = title, initial_title = title, workspace = { name = ws } })
+    title = title, initial_title = title, workspace = workspace_ref(workspace) })
   return addr
 end
 Stub.close_window = function(addr, missing_destroy_window)
@@ -422,10 +427,10 @@ Stub.close_window = function(addr, missing_destroy_window)
   end
   if not window then return end
 
-  local workspace = Stub._find(window.ws)
+  local workspace = Stub._find_address(window.ws)
   local event = {
     address = addr,
-    workspace = workspace and { name = workspace.name, active = is_visible(workspace.name) } or nil,
+    workspace = workspace and { name = workspace.name, addressable_name = workspace.address, active = is_visible(workspace.address) } or nil,
     monitor = workspace and {
       name = workspace.monitor,
       focused = focused_monitor() and focused_monitor().name == workspace.monitor,
@@ -438,9 +443,9 @@ Stub.close_window = function(addr, missing_destroy_window)
   if workspace and workspace.windows == 0 and is_named(workspace.name) then
     local home_name = workspace.name:match("^(%d+)")
     for _, monitor in ipairs(S.monitors) do
-      if monitor.active == workspace.name then
-        local home = Stub._find(home_name) or Stub._create(home_name, monitor.name)
-        monitor.active = home.name
+      if monitor.active == workspace.address then
+        local home = Stub._find_address(home_name) or Stub._create(home_name, monitor.name)
+        monitor.active = home.address
         fire("workspace.active", home)
       end
     end

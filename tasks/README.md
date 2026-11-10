@@ -60,7 +60,7 @@ promoted. Canceling the submap does not undo promotion.
 | `a–l` | Jump to that task row, retaining the tool column |
 | `Enter` | Active task picker |
 | `n` | Choose existing working copy or new jj workspace, open OpenCode |
-| `o` | Organize: close gaps and renumber rows in their current order |
+| `o` | Organize: archive empty desktop-only tasks, then close gaps in row order |
 | `s` | Snooze the current task (or unsnooze) |
 | `x` | Archive the current task |
 | `r` | Restore an archived task and open its agent |
@@ -86,11 +86,25 @@ all columns. If only `i` and `j` remain, `2i` becomes `2a` and `2j` becomes `2b`
 their editor/browser cells follow the same row mapping. Task IDs, names, checkouts,
 agent sessions, and descriptions are preserved. Each monitor keeps its viewed task
 under the new letter, and focus remains on the original monitor. Home columns are
-not renumbered. Empty managed task reservations still count as active rows; organize
-does not archive or delete them. Later window closures leave letters stable again.
+not renumbered. Before packing, organize archives active desktop-only tasks that have
+no windows, checkout, or agent session. Their metadata remains available for restore;
+no windows are closed. Tasks with checkouts, agent sessions, or setup in progress keep
+their reservations, even when empty. Later window closures leave letters stable again.
 
 The same desktop-only operation is available as `hyprgrid-task organize`. It runs
 under the lifecycle lock and records any pending prefix metadata before renumbering.
+
+On Hyprland 0.57.1, renaming a workspace changes only its display label, not its
+selector address. Organization now moves window groups into canonical cells instead.
+If an earlier organizer already left mismatched addresses or duplicate labels,
+organization and automatic healing refuse to rearrange that layout. Use workspace
+walking (`Super+Ctrl+H/L`) to reach the distinct existing addresses while planning
+user-directed recovery; do not rerun organize to attempt an automatic repair.
+
+Column placement is automatic: split columns rejoin their majority monitor after
+workspace moves and output changes, with the home monitor winning ties. Explicit
+whole-column moves remain authoritative until the output layout changes. No monitor
+is fixed in configuration, and no task shortcut is needed to heal a split column.
 
 `Super+D` renames the managed task for the current row. Its task name is also the
 bar's workspace description, so there is no second name to synchronize. On unmanaged

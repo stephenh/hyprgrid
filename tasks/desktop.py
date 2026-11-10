@@ -30,6 +30,10 @@ class Desktop:
         """Allocate without focusing; setup can continue while the user works elsewhere."""
         self.evaluate(f'hyprgrid.reserve({lua_string(task["id"])})')
 
+    def check_layout(self):
+        """Reject damaged labels before task ownership or reservations can change."""
+        self.evaluate('assert(not hyprgrid.layout_problem(), "Workspace labels need recovery; refusing to change task rows")')
+
     def organize(self):
         """Compact all rows in one compositor callback, preserving task identities."""
         self.evaluate("hyprgrid.organize()")
@@ -147,6 +151,7 @@ class Desktop:
         A window that refuses closure (for example an unsaved editor) keeps the row
         reserved and makes archive retryable. No class-wide or process-wide kill is used.
         """
+        self.check_layout()
         for client in self.clients(task):
             address = client["address"]
             pid = int(client["pid"])
