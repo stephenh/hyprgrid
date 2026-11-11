@@ -60,6 +60,12 @@ These live as tests in `tests/hyprland_behaviors.lua` — the stub is only usefu
 - `window.destroy` callbacks run from the native window destructor, so workspace mutation must wait until
   the callback returns.
 - **Focusing a workspace that doesn't exist creates it** on the focused monitor.
+- **Back-and-forth is not idempotent.** With `binds.workspace_back_and_forth=true` (global mode 1),
+  selecting the current workspace instead selects the previous workspace, possibly on another monitor.
+  The stub models this option through `hl.config`; its default remains disabled like Hyprland's.
+  Internal restoration and parking must skip already-focused targets, while direct user column switches
+  retain the configured toggle behavior. Verified against 0.57.1's
+  `ConfigActions.cpp::resolveWorkspaceForChange` and `LuaBindingsDispatchers.cpp::hlFocus`.
 - **Renaming onto an existing name produces a duplicate** — the "two `2a` workspaces" disaster.
 - **Hyprland 0.57.1 rename changes only the display name.** `name:2i` continues to select address `2i`
   after its display name becomes `2a`; focusing `name:2a` can create a second workspace displaying `2a`.

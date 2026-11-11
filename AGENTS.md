@@ -13,6 +13,9 @@ Read [CLAUDE.md](CLAUDE.md) for the grid development workflow and live-session r
   so distinct workspaces remain reachable even if their labels collide.
 - Majority-monitor alignment is automatic, not a task-submap recovery action. Preserve the viewed
   workspace when moving outliers onto its monitor; gathering a column must not hide its current task.
+- The user enables `binds.workspace_back_and_forth`. Internal focus/parking/restoration must use
+  `focus_workspace_exact`: reselecting the current workspace otherwise toggles to the previous one,
+  possibly on another monitor. Keep native toggle behavior only for direct user column switches.
 
 ## Bar plugin changes: verify the running code before diagnosing another bug
 

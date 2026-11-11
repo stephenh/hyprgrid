@@ -76,6 +76,16 @@ local function selector_for_workspace(ws)
   return "name:" .. (ws.addressable_name or ws.name)
 end
 
+-- Internal placement must be idempotent. With workspace_back_and_forth enabled, reselecting the
+-- current workspace means "go to the previous workspace", which may live on another monitor.
+-- Direct Super+N switches still use the native dispatcher so the user's toggle shortcut is preserved.
+local function focus_workspace_exact(selector)
+  local active = hl.get_active_workspace()
+  if not active or selector_for_workspace(active) ~= selector then
+    hl.dispatch(hl.dsp.focus({ workspace = selector }))
+  end
+end
+
 -- Resolve an existing cell's real address, preferring its windowed instance over an empty duplicate.
 -- Do not create a missing cell through an address already owned by a differently labelled workspace.
 local function selector_for(col, row)
@@ -217,7 +227,7 @@ local function heal_split_columns()
   -- task only if it survived on the original monitor; never recreate an empty cell disposed by the move.
   for _, ws in ipairs(hl.get_workspaces()) do
     if ws.monitor and ws.monitor.name == origin and selector_for_workspace(ws) == origin_workspace then
-      hl.dispatch(hl.dsp.focus({ workspace = origin_workspace }))
+      focus_workspace_exact(origin_workspace)
       break
     end
   end
@@ -266,13 +276,13 @@ local function set_all_to_row(R, origin_col)
   -- can't leave the focused monitor stranded on the wrong workspace.
   for _, target in ipairs(targets) do
     hl.dispatch(hl.dsp.focus({ monitor = target.monitor }))
-    hl.dispatch(hl.dsp.focus({ workspace = target.workspace }))
+    focus_workspace_exact(target.workspace)
   end
   -- Move the focused monitor strictly LAST, re-asserting its workspace explicitly (not just re-focusing
   -- the monitor). Nothing runs after this, so Super+Ctrl+J/K can never drift it off its own column.
   if origin_target then
     hl.dispatch(hl.dsp.focus({ monitor = origin }))
-    hl.dispatch(hl.dsp.focus({ workspace = origin_target }))
+    focus_workspace_exact(origin_target)
   end
   syncing = false
 end
@@ -357,7 +367,7 @@ local function reconcile_tags(closed_cell, force_compact)
     local col = cell_of(m.active_workspace and m.active_workspace.name)
     if col then
       hl.dispatch(hl.dsp.focus({ monitor = m.name }))
-      hl.dispatch(hl.dsp.focus({ workspace = col }))
+      focus_workspace_exact(selector_for(col, 1))
     end
   end
 
@@ -405,7 +415,7 @@ local function reconcile_tags(closed_cell, force_compact)
       local view = views[monitor]
       if not view then return end
       hl.dispatch(hl.dsp.focus({ monitor = monitor }))
-      hl.dispatch(hl.dsp.focus({ workspace = selector_for(view.col, newrow[view.row] or 1) }))
+      focus_workspace_exact(selector_for(view.col, newrow[view.row] or 1))
     end
     -- Restore the focused monitor last, just as lock-step navigation does.
     for _, mon in ipairs(hl.get_monitors()) do
@@ -743,7 +753,7 @@ function hyprgrid.route_window(address, workspace, follow)
     workspace = workspace, follow = false }))
   heal_split_columns()
   -- Zed can activate a different workspace while launching; follow only after placing its window.
-  if follow then hl.dispatch(hl.dsp.focus({ workspace = workspace })) end
+  if follow then focus_workspace_exact(workspace) end
   schedule_reconcile()
 end
 

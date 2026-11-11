@@ -198,3 +198,32 @@ H.scenario("automatic healing does not hide the viewed task behind a drifted hom
   -- Then the user is still viewing b, not home or whichever workspace moved last.
   H.expect_active("DP-1", "2b")
 end)
+
+H.scenario("a no-op heal cannot toggle the current workspace through back-and-forth", function()
+  -- Given two visited workspaces with no split column.
+  local Stub = require("stub.hyprland")
+  H.boot()
+  H.open("1")
+  Stub.seed_window("4", "DP-1")
+  H.hl.config({ binds = { workspace_back_and_forth = true } })
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "4" }))
+  -- When an output event queues healing but no workspace needs to move.
+  H.add_mon("DP-3", 7680)
+  H.timers()
+  -- Then the already-viewed workspace stays visible instead of toggling to 1.
+  H.expect_active("DP-1", "4")
+end)
+
+H.scenario("loading the grid cannot toggle the already-focused workspace", function()
+  -- Given the user's back-and-forth setting before the grid loads on config reload.
+  local Stub = require("stub.hyprland")
+  H.boot_bare({ { name = "DP-1", x = 0 } })
+  H.open("1")
+  H.open("4")
+  H.hl.config({ binds = { workspace_back_and_forth = true } })
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "4" }))
+  -- When the grid performs its initial no-op heal.
+  Stub.load("workspace-grid.lua")
+  -- Then loading config leaves the current workspace alone.
+  H.expect_active("DP-1", "4")
+end)

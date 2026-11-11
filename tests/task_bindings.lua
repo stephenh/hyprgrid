@@ -761,3 +761,35 @@ H.scenario("automatic majority healing still runs after organization", function(
   -- Then c automatically rejoins its column on DP-1.
   H.eq(H.workspaces()["2c"].mon, "DP-1")
 end)
+
+H.scenario("organizing from home never flashes its previous task while parking monitors", function()
+  -- Given home 2 after a visit to c, with the user's back-and-forth setting.
+  H.boot({ { name = "DP-1", x = 0, home = "2" } })
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2", "DP-1")
+  Stub.seed_window("2c", "DP-1")
+  Stub.seed_window("2f", "DP-1")
+  H.hl.config({ binds = { workspace_back_and_forth = true } })
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2c" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "2" }))
+  local flashed = false
+  H.hl.on("workspace.active", function(ws) if ws.name == "2c" then flashed = true end end)
+  -- When organizing the other tasks from home.
+  hyprgrid.organize()
+  -- Then parking home does not accidentally toggle to the previous task.
+  H.eq(flashed, false)
+end)
+
+H.scenario("routing a window to its already-focused task does not toggle away", function()
+  -- Given a task window already on its launch cell and a previous home workspace.
+  H.boot({ { name = "DP-1", x = 0, home = "2" } })
+  loadfile("task-workspaces.lua")()({ path = false })
+  Stub.seed_window("2", "DP-1")
+  local address = Stub.seed_window("2a", "DP-1")
+  H.hl.config({ binds = { workspace_back_and_forth = true } })
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2a" }))
+  -- When completing the launch's follow request.
+  hyprgrid.route_window(address, "name:2a", true)
+  -- Then the already-selected task stays visible instead of returning home.
+  H.expect_active("DP-1", "2a")
+end)

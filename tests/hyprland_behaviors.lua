@@ -179,3 +179,29 @@ H.scenario("behavior: repeated renames still address the original workspace key"
   -- Then the same workspace now displays 2b.
   H.expect_windows("2b", 1)
 end)
+
+H.scenario("behavior: selecting the current workspace toggles back when back-and-forth is enabled", function()
+  -- Given two windowed workspaces and the user's back-and-forth setting.
+  H.boot_bare({ { name = "DP-1", x = 0 } })
+  H.open("1")
+  H.open("2")
+  hl.config({ binds = { workspace_back_and_forth = true } })
+  hl.dispatch(hl.dsp.focus({ workspace = "2" }))
+  -- When a caller tries to reassert the workspace already being viewed.
+  hl.dispatch(hl.dsp.focus({ workspace = "2" }))
+  -- Then Hyprland interprets that as a request for the previous workspace.
+  H.expect_active("DP-1", "1")
+end)
+
+H.scenario("behavior: global back-and-forth can return to a workspace on another monitor", function()
+  -- Given windowed homes on two monitors and global back-and-forth enabled.
+  H.boot_bare()
+  H.open("1")
+  H.open("2")
+  hl.config({ binds = { workspace_back_and_forth = true } })
+  hl.dispatch(hl.dsp.focus({ workspace = "2" }))
+  -- When reselecting the active workspace on DP-2.
+  hl.dispatch(hl.dsp.focus({ workspace = "2" }))
+  -- Then the global previous workspace brings focus back to DP-1.
+  H.expect_focused("DP-1")
+end)

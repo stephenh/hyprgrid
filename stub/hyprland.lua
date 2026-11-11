@@ -13,6 +13,8 @@
 --     numeric ID; their display name can change without changing what a name: selector resolves.
 --   * Focusing a workspace that does not exist CREATES it (empty) on the focused monitor.
 --   * Focusing a workspace that lives on another monitor moves focus to that monitor.
+--   * With binds.workspace_back_and_forth enabled, selecting the current workspace selects the previous
+--     workspace instead. Internal focus restoration must not assume that reselecting is a no-op.
 --   * Renaming a workspace onto a name that already exists produces a DUPLICATE (two same-named ws).
 --   * Renaming drops the persistent rule (rules are keyed by name), so renaming an EMPTY workspace makes
 --     it non-persistent-and-empty -> it is disposed. A windowed workspace survives a rename.
@@ -49,12 +51,14 @@ function Stub.reset(monitors)
     next_named_id = -1000,
     next_addr = 0,
     log = {},        -- event log for debugging
+    workspace_back_and_forth = false,
   }
   for i, m in ipairs(monitors or { { name = "DP-1", x = 0 } }) do
     local home = m.home or tostring(i) -- each monitor starts on a distinct home workspace (1, 2, 3, ...)
     S.monitors[i] = { name = m.name, x = m.x or 0, y = m.y or 0, focused = (i == 1), active = home }
     if not Stub._find(home) then Stub._create(home, m.name) end
   end
+  S.current_workspace = S.monitors[1].active
   _G.hl = Stub.hl
   _G.o = Stub.o
 end
@@ -113,6 +117,13 @@ end
 local function focused_monitor() for _, m in ipairs(S.monitors) do if m.focused then return m end end end
 
 local function fire(event, arg)
+  if event == "workspace.active" then
+    local monitor = focused_monitor()
+    local address = monitor and monitor.active
+    if address and address ~= S.current_workspace then
+      S.previous_workspace, S.current_workspace = S.current_workspace, address
+    end
+  end
   S.log[#S.log + 1] = event
   for _, cb in ipairs(S.handlers[event] or {}) do cb(arg) end
 end
@@ -216,7 +227,11 @@ local function apply(desc)
       focus_monitor(desc.monitor)
     elseif desc.workspace then
       local ws = resolve(desc.workspace)
-      focus_workspace(ws and ws.address or desc.workspace:gsub("^name:", ""))
+      local address = ws and ws.address or desc.workspace:gsub("^name:", "")
+      if S.workspace_back_and_forth and address == focused_monitor().active and S.previous_workspace then
+        address = S.previous_workspace
+      end
+      focus_workspace(address)
     end
   elseif op == "ws_move" then -- moveworkspacetomonitor
     local w = resolve(desc.workspace)
@@ -360,6 +375,14 @@ function hl.timer(cb, opts)
   S.timers[#S.timers + 1] = cb
 end
 function hl.monitor(_spec) end -- test sets up monitors via Stub.reset; ignore config-time monitor rules
+
+-- Model the global back-and-forth setting used by the user's Lua config; other options are irrelevant here.
+function hl.config(spec)
+  if spec.binds and spec.binds.workspace_back_and_forth ~= nil then
+    local value = spec.binds.workspace_back_and_forth
+    S.workspace_back_and_forth = value == true or value == 1
+  end
+end
 
 -- workspace_rule: persistence. persistent=true creates-if-missing (on `monitor` or focused); =false disposes
 -- the workspace if it is empty and not visible.

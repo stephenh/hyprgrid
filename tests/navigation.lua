@@ -109,3 +109,17 @@ H.scenario("Super+0 falls back to roam when its matching task cell is absent", f
   -- Then it reaches numbered workspace 10 instead of rejecting its display name.
   H.eq(H.hl.get_active_workspace().id, 10)
 end)
+
+H.scenario("direct Super+0 presses retain the user's back-and-forth behavior", function()
+  -- Given home 2, roam, and the user's back-and-forth setting.
+  local Stub = require("stub.hyprland")
+  H.boot({ { name = "DP-1", x = 0, home = "2" } })
+  Stub.seed_window("2", "DP-1")
+  Stub.seed_window("0", "DP-1", 10)
+  H.hl.config({ binds = { workspace_back_and_forth = true } })
+  -- When the user explicitly selects roam twice.
+  H.press("SUPER + code:19")
+  H.press("SUPER + code:19")
+  -- Then the second press still returns to home 2.
+  H.expect_active("DP-1", "2")
+end)
