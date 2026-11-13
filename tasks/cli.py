@@ -58,7 +58,10 @@ def main():
     args = parser.parse_args()
     store = Store()
     settings = Settings()
-    executable = str(Path(__file__).resolve().parent / "hyprgrid-task")
+    launcher = Path(__file__).resolve().parent / "hyprgrid-task"
+    if not launcher.is_file():
+        launcher = Path(__file__).resolve().parents[2] / "bin/hyprgrid-task"
+    executable = str(launcher)
     desktop = Desktop(store, executable) if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") else None
     manager = Manager(store, settings, desktop=desktop)
     try:

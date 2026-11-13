@@ -2,6 +2,16 @@
 
 Read [CLAUDE.md](CLAUDE.md) for the grid development workflow and live-session restrictions.
 
+## Task CLI deployment
+
+`~/.local/bin/hyprgrid-task` is a real executable, not a symlink into this checkout.
+Its modules are real files in `~/.local/lib/hyprgrid-task/`: `cli.py`, `core.py`, and
+`desktop.py`. All four files are un-ignored in the home dotfiles repository.
+
+Keep these installed files byte-identical to `tasks/` when changing the task CLI.
+Diff and back up installed files before deploying; preserve unrelated live edits.
+Follow [tasks/README.md](tasks/README.md) for installation. Do not restore the symlink.
+
 ## Hyprland 0.57.1 workspace addresses are not display names
 
 - Lua `workspace.name` is a display label. `workspace.addressable_name` is the stable selector key.

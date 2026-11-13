@@ -14,8 +14,22 @@ python -m unittest discover -s tests -p 'test_*.py'
 node --test tests/workspaces.test.js
 ```
 
-Put `tasks/hyprgrid-task` on PATH (a symlink into this checkout works; the launcher
-resolves its adjacent Python files). Create `~/.local/state/hyprgrid/` and an empty
+Install real files rather than a symlink into this checkout. Before updating an existing
+installation, diff and back up the installed files to preserve unrelated edits. From
+the repository root:
+
+```sh
+install -d ~/.local/bin ~/.local/lib/hyprgrid-task
+install -m 644 tasks/cli.py tasks/core.py tasks/desktop.py ~/.local/lib/hyprgrid-task/
+install -m 755 tasks/hyprgrid-task ~/.local/bin/hyprgrid-task
+```
+
+If migrating an existing symlink, back it up and remove the link before installing;
+do not overwrite its target. The same launcher also runs directly from `tasks/`.
+The launcher and three modules are tracked in the home dotfiles repository via
+explicit `.gitignore` exceptions; keep them byte-identical to their source copies.
+
+Create `~/.local/state/hyprgrid/` and an empty
 `rows.tsv` there before enabling the desktop adapter. Running `hyprgrid-task list`
 initializes `tasks.json`.
 
