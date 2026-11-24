@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Manage per-workspace descriptions shown in waybar.
+# Manage per-workspace descriptions shown in Waybar and the Omarchy shell.
 #   hypr-ws-desc show [MON] -> print the description for MON's active workspace (for a per-monitor
-#                              waybar bar), or the focused workspace's if no monitor is given
+#                              bar), or the focused workspace's if no monitor is given
 #   hypr-ws-desc set   -> prompt for the active workspace's description and save it
 #   hypr-ws-desc seed  -> reset the runtime store from the git-tracked defaults (on login)
 # DEFAULTS is checked into git and shared across machines; STORE is ephemeral (reset each login).
@@ -9,6 +9,7 @@ set -uo pipefail
 
 STORE="${XDG_STATE_HOME:-$HOME/.local/state}/hypr/workspace-descriptions.json"
 DEFAULTS="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/workspace-descriptions.default.json"
+# Quattro watches STORE directly; keep these refresh signals for legacy Waybar installations.
 WAYBAR_SIGNAL=11
 
 # Copy the defaults into the store (falling back to "{}"). I.e. used by ensure_store and seed.

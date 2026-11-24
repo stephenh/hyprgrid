@@ -11,7 +11,7 @@ Run the tests first, from this repository:
 ```sh
 lua run.lua
 python -m unittest discover -s tests -p 'test_*.py'
-node --test tests/workspaces.test.js
+node --test tests/*.test.js
 ```
 
 Install real files rather than a symlink into this checkout. Before updating an existing
