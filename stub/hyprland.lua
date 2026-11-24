@@ -5,6 +5,7 @@
 -- Modeled behaviors (each learned the hard way on the real thing):
 --   * A monitor always shows exactly one workspace (its "active"); the focused monitor's active workspace
 --     is the global active workspace.
+--   * Moving a monitor's last workspace away creates the lowest unused numbered workspace there.
 --   * Empty, non-persistent workspaces are disposed (garbage-collected) the moment they stop being visible
 --     (i.e. are not the active workspace of any monitor). Disposal fires `workspace.removed`.
 --   * Closing the last window on a visible grid workspace falls back to its numbered home before
@@ -247,7 +248,12 @@ local function apply(desc)
         if mm.name == old and mm.active == w.address then
           local repl
           for _, x in ipairs(S.workspaces) do if x.monitor == old and x.address ~= w.address then repl = x.address; break end end
-          if not repl then repl = old:match("%d") and old or "1"; if not Stub._find(repl) then Stub._create(repl, old) end end
+          if not repl then
+            local id = 1
+            while resolve(tostring(id)) do id = id + 1 end
+            repl = tostring(id)
+            Stub._create(repl, old)
+          end
           mm.active = repl
         end
       end

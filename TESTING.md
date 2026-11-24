@@ -54,6 +54,11 @@ A test resets it, `loadfile`s the real grid script (so its binds/handlers regist
 These live as tests in `tests/hyprland_behaviors.lua` — the stub is only useful insofar as they hold:
 
 - A monitor always shows one workspace; the focused monitor's is the global active workspace.
+- Moving its last workspace to another monitor creates the lowest unused numbered workspace as a
+  fallback. Automatic column healing must leave a monitor's sole empty home workspace out of anchor
+  votes and moves; otherwise these fallbacks can be repeatedly created and moved away.
+  Explicit window sends and delayed task launches still use their destination column's empty home
+  to locate its monitor.
 - **Empty, non-persistent workspaces are disposed the instant they stop being visible** (fires `workspace.removed`).
 - Closing the last window on a visible grid workspace falls back to its numbered home before
   `window.destroy`; `window.close` still identifies the grid workspace.

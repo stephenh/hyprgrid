@@ -188,18 +188,35 @@ end
 -- otherwise makes the lock-step focus a tag on another screen, bouncing focus off the monitor you're on
 -- and dropping waybar's active underline.) No-op when nothing is split; focus is left where it was.
 -- An explicit column destination takes precedence while that monitor remains connected.
-local function heal_split_columns()
+-- Explicit window placement can still use its destination column's empty home to locate the monitor.
+local function heal_split_columns(placement_col)
   if healing or relocating then return end
   if grid_layout_problem() then return end
   healing = true
   local origin = focused_monitor()
   local active = hl.get_active_workspace()
   local origin_workspace = active and selector_for_workspace(active)
+
+  -- Hyprland gives every monitor a workspace. Moving its sole empty home creates another numbered
+  -- fallback, so healing alternates forever between 1 and 2. Leave that placeholder out of both the
+  -- anchor vote and the moves; it must not pull a populated task column onto its monitor in a tie.
+  local workspaces = hl.get_workspaces()
+  local monitor_counts, healable = {}, {}
+  for _, ws in ipairs(workspaces) do
+    if ws.monitor then
+      local monitor = ws.monitor.name
+      monitor_counts[monitor] = (monitor_counts[monitor] or 0) + 1
+    end
+  end
+
   -- Per column: how many of its workspaces sit on each monitor, and which monitor holds its home.
   local counts, home_mon = {}, {}
-  for _, ws in ipairs(hl.get_workspaces()) do
+  for _, ws in ipairs(workspaces) do
     local col, row = workspace_cell(ws)
-    if col and ws.monitor then
+    local fallback = ws.monitor and row == 1 and (ws.windows or 0) == 0
+      and monitor_counts[ws.monitor.name] == 1
+    if col and ws.monitor and (not fallback or col == placement_col) then
+      healable[ws] = true
       counts[col] = counts[col] or {}
       counts[col][ws.monitor.name] = (counts[col][ws.monitor.name] or 0) + 1
       if row == 1 then home_mon[col] = ws.monitor.name end
@@ -217,9 +234,9 @@ local function heal_split_columns()
     local destination = column_destinations[col]
     anchor[col] = destination and connected[destination] and destination or best
   end
-  for _, ws in ipairs(hl.get_workspaces()) do
+  for _, ws in ipairs(workspaces) do
     local col = workspace_cell(ws)
-    if col and ws.monitor and anchor[col] and ws.monitor.name ~= anchor[col] then
+    if healable[ws] and anchor[col] and ws.monitor.name ~= anchor[col] then
       hl.dispatch(hl.dsp.workspace.move({ workspace = selector_for_workspace(ws), monitor = anchor[col] }))
     end
   end
@@ -516,7 +533,7 @@ local function send_to_column(col)
   local _, source_row = current_cell()
   if source_row and source_row >= 2 then row = source_row end
   hl.dispatch(hl.dsp.window.move({ workspace = selector_for(col, row), follow = true }))
-  heal_split_columns()
+  heal_split_columns(col)
   schedule_reconcile()
 end
 
@@ -751,7 +768,7 @@ function hyprgrid.route_window(address, workspace, follow)
   if col then workspace = selector_for(col, row) end
   hl.dispatch(hl.dsp.window.move({ window = "address:" .. address,
     workspace = workspace, follow = false }))
-  heal_split_columns()
+  heal_split_columns(col)
   -- Zed can activate a different workspace while launching; follow only after placing its window.
   if follow then focus_workspace_exact(workspace) end
   schedule_reconcile()

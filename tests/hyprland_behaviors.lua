@@ -205,3 +205,16 @@ H.scenario("behavior: global back-and-forth can return to a workspace on another
   -- Then the global previous workspace brings focus back to DP-1.
   H.expect_focused("DP-1")
 end)
+
+H.scenario("behavior: moving a monitor's sole workspace creates the lowest unused numbered fallback", function()
+  -- Given the third monitor has only workspace 1.
+  H.boot_bare({
+    { name = "DP-1", x = 0, home = "4" },
+    { name = "DP-2", x = 2560, home = "5" },
+    { name = "HDMI-A-1", x = 5120, home = "1" },
+  })
+  -- When its workspace moves to another monitor.
+  hl.dispatch(hl.dsp.workspace.move({ workspace = "1", monitor = "DP-2" }))
+  -- Then the third monitor gets workspace 2 instead of sharing workspace 1.
+  H.expect_active("HDMI-A-1", "2")
+end)

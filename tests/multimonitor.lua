@@ -227,3 +227,79 @@ H.scenario("loading the grid cannot toggle the already-focused workspace", funct
   -- Then loading config leaves the current workspace alone.
   H.expect_active("DP-1", "4")
 end)
+
+H.scenario("healing leaves the third monitor's sole empty fallback in place", function()
+  local Stub = require("stub.hyprland")
+  -- Given task columns on the first two monitors.
+  H.boot_bare({
+    { name = "DP-1", x = 0, home = "4" },
+    { name = "DP-2", x = 2560, home = "5" },
+    { name = "HDMI-A-1", x = 5120, home = "1" },
+  })
+  -- And the third monitor has only empty home 1.
+  Stub.seed_window("1a", "DP-2")
+  Stub.seed_window("1b", "DP-2")
+  Stub.seed_window("2a", "DP-1")
+  Stub.seed_window("2b", "DP-1")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:2a" }))
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1a" }))
+  -- When loading the grid and processing repeated healing timers.
+  Stub.load("workspace-grid.lua")
+  for _ = 1, 4 do H.timers() end
+  -- Then the fallback stays put instead of alternating between 1 and 2.
+  H.expect_active("HDMI-A-1", "1")
+end)
+
+H.scenario("an empty sole fallback cannot win the home-monitor anchor tie", function()
+  local Stub = require("stub.hyprland")
+  -- Given a populated tag on DP-2 and its empty home alone on the third monitor.
+  H.boot_bare({
+    { name = "DP-1", x = 0, home = "4" },
+    { name = "DP-2", x = 2560, home = "5" },
+    { name = "HDMI-A-1", x = 5120, home = "1" },
+  })
+  Stub.seed_window("1a", "DP-2")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1a" }))
+  -- When automatic healing chooses the column's anchor.
+  Stub.load("workspace-grid.lua")
+  -- Then the populated tag does not follow the fallback home.
+  H.eq(H.workspaces()["1a"].mon, "DP-2")
+end)
+
+H.scenario("healing still moves a populated sole home to its task column", function()
+  local Stub = require("stub.hyprland")
+  -- Given two tags on DP-2.
+  H.boot_bare({
+    { name = "DP-1", x = 0, home = "4" },
+    { name = "DP-2", x = 2560, home = "5" },
+    { name = "HDMI-A-1", x = 5120, home = "1" },
+  })
+  Stub.seed_window("1a", "DP-2")
+  Stub.seed_window("1b", "DP-2")
+  -- And their home on the third monitor has a window.
+  Stub.seed_window("1", "HDMI-A-1")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1a" }))
+  -- When automatic healing runs.
+  Stub.load("workspace-grid.lua")
+  -- Then the populated home rejoins its tags.
+  H.eq(H.workspaces()["1"].mon, "DP-2")
+end)
+
+H.scenario("healing still moves an empty home when its monitor has another workspace", function()
+  local Stub = require("stub.hyprland")
+  -- Given two tags on DP-2.
+  H.boot_bare({
+    { name = "DP-1", x = 0, home = "4" },
+    { name = "DP-2", x = 2560, home = "5" },
+    { name = "HDMI-A-1", x = 5120, home = "1" },
+  })
+  Stub.seed_window("1a", "DP-2")
+  Stub.seed_window("1b", "DP-2")
+  -- And the third monitor has another workspace to fall back to.
+  Stub.seed_window("9", "HDMI-A-1")
+  H.hl.dispatch(H.hl.dsp.focus({ workspace = "name:1a" }))
+  -- When automatic healing runs.
+  Stub.load("workspace-grid.lua")
+  -- Then the home moves off the third monitor and is disposed when the viewed tag is restored.
+  H.expect_absent("1")
+end)
